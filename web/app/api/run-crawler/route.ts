@@ -1,5 +1,5 @@
 import { NextResponse } from "next/server";
-import { exec } from "child_process";
+import { exec, ExecOptions } from "child_process";
 import path from "path";
 import fs from "fs";
 import { promisify } from "util";
@@ -31,13 +31,14 @@ export async function POST(req: Request) {
 
     const tryRun = async (pythonCmd: string) => {
       const cmd = `${pythonCmd} ${argsStr}`;
-      return execAsync(cmd, {
+      const opts: ExecOptions = {
         cwd: projectRoot,
         timeout: 280000,
         maxBuffer: 2 * 1024 * 1024,
-        shell: true,
+        shell: process.platform === "win32" ? "cmd.exe" : "/bin/sh",
         encoding: "utf8",
-      });
+      };
+      return execAsync(cmd, opts);
     };
 
     let stdout = "";
@@ -47,8 +48,8 @@ export async function POST(req: Request) {
     for (const pythonCmd of process.platform === "win32" ? ["python", "py"] : ["python"]) {
       try {
         const result = await tryRun(pythonCmd);
-        stdout = (result.stdout || "").trim();
-        stderr = (result.stderr || "").trim();
+        stdout = (typeof result.stdout === "string" ? result.stdout : result.stdout?.toString?.() ?? "").trim();
+        stderr = (typeof result.stderr === "string" ? result.stderr : result.stderr?.toString?.() ?? "").trim();
         if (stderr && !stdout) {
           return NextResponse.json(
             { error: "크롤러 실행 오류", detail: stderr.slice(-800) },

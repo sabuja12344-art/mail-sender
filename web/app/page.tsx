@@ -130,7 +130,7 @@ export default function DashboardPage() {
   const setSelectedToReady = async () => {
     if (selected.size === 0) return;
     let ok = 0;
-    for (const id of selected) {
+    for (const id of Array.from(selected)) {
       try {
         const res = await fetch("/api/brands", {
           method: "PATCH",
