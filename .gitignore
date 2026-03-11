@@ -1,0 +1,15 @@
+# 환경 변수 (키 노출 방지)
+.env
+.env.local
+.env.*.local
+
+# 의존성 / 빌드
+node_modules/
+dist/
+build/
+.next/
+
+# 로그 / OS
+*.log
+.DS_Store
+Thumbs.db
