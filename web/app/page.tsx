@@ -91,8 +91,9 @@ export default function DashboardPage() {
 
   // 선택 관리
   const [selected, setSelected] = useState<Set<string>>(new Set());
-  // 테이블 필터: 전체 | 발송완료만
-  const [statusFilter, setStatusFilter] = useState<"전체" | "발송완료">("전체");
+  // 테이블 필터: 전체 | 발송완료만 | 발송완료 제외
+  const [statusFilter, setStatusFilter] = useState<"전체" | "발송완료" | "발송완료제외">("전체");
+  const [keywordFilter, setKeywordFilter] = useState<string>("");
 
   const fetchBrands = useCallback(async () => {
     setLoading(true);
@@ -371,10 +372,20 @@ export default function DashboardPage() {
     });
   };
 
-  const filteredBrands =
-    statusFilter === "발송완료"
-      ? brands.filter((b) => b.status === "발송완료")
-      : brands;
+  const uniqueKeywords = Array.from(new Set(brands.map((b) => b.search_keyword).filter(Boolean) as string[])).sort();
+
+  const filteredBrands = (() => {
+    let list =
+      statusFilter === "발송완료"
+        ? brands.filter((b) => b.status === "발송완료")
+        : statusFilter === "발송완료제외"
+        ? brands.filter((b) => b.status !== "발송완료")
+        : brands;
+    if (keywordFilter) {
+      list = list.filter((b) => (b.search_keyword || "").trim() === keywordFilter);
+    }
+    return list;
+  })();
   const canSelectBrand = (b: Brand) =>
     !!b.email && (b.status === "수집완료" || b.status === "발송대기");
 
@@ -922,9 +933,9 @@ export default function DashboardPage() {
         </div>
       )}
 
-      {/* 목록 필터: 전체 | 발송완료만 */}
+      {/* 목록 필터: 전체 | 발송완료만 | 발송완료 제외 | 키워드 */}
       {!loading && brands.length > 0 && (
-        <div style={{ marginBottom: 12, display: "flex", alignItems: "center", gap: 8 }}>
+        <div style={{ marginBottom: 12, display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
           <span style={{ fontWeight: 600, fontSize: 13 }}>표시:</span>
           <button
             type="button"
@@ -954,6 +965,44 @@ export default function DashboardPage() {
           >
             발송완료만
           </button>
+          <button
+            type="button"
+            onClick={() => setStatusFilter("발송완료제외")}
+            style={{
+              padding: "6px 14px",
+              borderRadius: 8,
+              border: "1px solid #e2e8f0",
+              background: statusFilter === "발송완료제외" ? "#fef3c7" : "#fff",
+              cursor: "pointer",
+              fontWeight: statusFilter === "발송완료제외" ? 600 : 400,
+            }}
+          >
+            발송완료 제외
+          </button>
+          {uniqueKeywords.length > 0 && (
+            <>
+              <span style={{ fontWeight: 600, fontSize: 13, marginLeft: 8 }}>키워드:</span>
+              <select
+                value={keywordFilter}
+                onChange={(e) => setKeywordFilter(e.target.value)}
+                style={{
+                  padding: "6px 12px",
+                  borderRadius: 8,
+                  border: "1px solid #e2e8f0",
+                  background: "#fff",
+                  fontSize: 13,
+                  minWidth: 140,
+                }}
+              >
+                <option value="">전체 키워드</option>
+                {uniqueKeywords.map((kw) => (
+                  <option key={kw} value={kw}>
+                    {kw}
+                  </option>
+                ))}
+              </select>
+            </>
+          )}
         </div>
       )}
 
@@ -966,7 +1015,11 @@ export default function DashboardPage() {
         </p>
       ) : filteredBrands.length === 0 ? (
         <p style={{ color: "#64748b" }}>
-          {statusFilter === "발송완료" ? "발송완료 건이 없습니다." : "표시할 브랜드가 없습니다."}
+          {statusFilter === "발송완료"
+            ? "발송완료 건이 없습니다."
+            : keywordFilter
+            ? `키워드 '${keywordFilter}'에 해당하는 건이 없습니다.`
+            : "표시할 브랜드가 없습니다."}
         </p>
       ) : (
         <div style={{ overflowX: "auto", background: "#fff", borderRadius: 12, boxShadow: "0 1px 3px rgba(0,0,0,0.1)" }}>
