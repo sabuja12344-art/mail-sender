@@ -1,0 +1,46 @@
+# 수집 실행 버튼으로 트리거 (비용 없음 - GitHub Actions 무료 한도 내 실행)
+name: Run crawler
+
+on:
+  workflow_dispatch:
+    inputs:
+      keyword:
+        description: '검색 키워드'
+        required: false
+        default: '자사몰'
+      pages:
+        description: '쇼핑검색 페이지 수'
+        required: false
+        default: '1'
+      skip_no_email:
+        description: '이메일 없는 업체 수집 안 함'
+        required: false
+        default: 'false'
+        type: boolean
+
+jobs:
+  crawl:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Install dependencies
+        run: |
+          pip install -r crawler/requirements.txt
+          playwright install chromium
+          playwright install-deps chromium
+
+      - name: Run crawler
+        env:
+          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
+        run: |
+          if [ "${{ github.event.inputs.skip_no_email }}" = "true" ]; then EXTRA="--skip-no-email"; else EXTRA=""; fi
+          python crawler/brand_crawler.py "${{ github.event.inputs.keyword }}" --pages ${{ github.event.inputs.pages }} $EXTRA
