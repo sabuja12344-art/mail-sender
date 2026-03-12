@@ -37,7 +37,8 @@ export default function DashboardPage() {
   const [crawlerKeyword, setCrawlerKeyword] = useState("");
   const [crawlerPages, setCrawlerPages] = useState(1);
   const [crawlerSkipNoEmail, setCrawlerSkipNoEmail] = useState(false);
-  const [crawlerUrl, setCrawlerUrl] = useState("http://localhost:5000");
+  const defaultCrawlerUrl = process.env.NEXT_PUBLIC_CRAWLER_URL?.trim() || "http://localhost:5000";
+  const [crawlerUrl, setCrawlerUrl] = useState(defaultCrawlerUrl);
   const [showCrawlerSettings, setShowCrawlerSettings] = useState(false);
   const [crawlerServerOnline, setCrawlerServerOnline] = useState<boolean | null>(null);
   const [crawlerElapsed, setCrawlerElapsed] = useState(0);
@@ -46,7 +47,8 @@ export default function DashboardPage() {
   useEffect(() => {
     const saved = localStorage.getItem("crawlerUrl");
     if (saved) setCrawlerUrl(saved);
-  }, []);
+    else if (defaultCrawlerUrl !== "http://localhost:5000") setCrawlerUrl(defaultCrawlerUrl);
+  }, [defaultCrawlerUrl]);
 
   const saveCrawlerUrl = (url: string) => {
     setCrawlerUrl(url);
@@ -55,7 +57,10 @@ export default function DashboardPage() {
 
   const checkCrawlerHealth = useCallback(async () => {
     try {
-      const res = await fetch(`${crawlerUrl.replace(/\/+$/, "")}/health`, { signal: AbortSignal.timeout(3000) });
+      const res = await fetch(`${crawlerUrl.replace(/\/+$/, "")}/health`, {
+        signal: AbortSignal.timeout(3000),
+        headers: { "ngrok-skip-browser-warning": "true" },
+      });
       const d = await res.json();
       setCrawlerServerOnline(!!d.ok);
     } catch {
@@ -185,7 +190,7 @@ export default function DashboardPage() {
       const baseUrl = crawlerUrl.replace(/\/+$/, "");
       const res = await fetch(`${baseUrl}/run`, {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
+        headers: { "Content-Type": "application/json", "ngrok-skip-browser-warning": "true" },
         body: JSON.stringify({
           keyword: crawlerKeyword,
           pages: crawlerPages,
@@ -510,7 +515,9 @@ export default function DashboardPage() {
                 type="button"
                 onClick={async () => {
                   try {
-                    const res = await fetch(`${crawlerUrl.replace(/\/+$/, "")}/health`);
+                    const res = await fetch(`${crawlerUrl.replace(/\/+$/, "")}/health`, {
+                      headers: { "ngrok-skip-browser-warning": "true" },
+                    });
                     const d = await res.json();
                     setMessage({ type: "ok", text: d.ok ? "크롤러 서버 연결 성공" : "응답이 올바르지 않습니다." });
                   } catch {
@@ -523,7 +530,7 @@ export default function DashboardPage() {
               </button>
             </div>
             <p style={{ fontSize: 11, color: "#94a3b8", marginTop: 4, marginBottom: 0 }}>
-              기본값: http://localhost:5000 — PC에서 python crawler/server.py 또는 start-crawler.bat 실행 필요
+              혼자 사용: http://localhost:5000 (기본) — 여러 명 사용: ngrok URL 입력 (예: https://xxxx.ngrok-free.app)
             </p>
           </div>
         )}
