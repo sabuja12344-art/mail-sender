@@ -47,9 +47,11 @@ EMAIL_REGEX = re.compile(
 PIXEL_KEYWORDS = ("GTM", "FB Pixel", "Kakao Pixel", "gtm.js", "fbevents.js")
 USER_AGENT = (
     "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
-    "(KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
+    "(KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36"
 )
 REQUEST_DELAY_SEC = 1.5  # 요청 간 딜레이 (서버 부하·차단 완화)
+# 네이버 검색 페이지 JS 렌더링 대기 (해외 서버에서는 더 길게)
+NAVER_LOAD_WAIT_SEC = 6
 
 
 def get_supabase() -> Client:
@@ -302,7 +304,11 @@ async def collect_powerlink_urls(page, keyword: str, max_results: int = 20) -> s
     urls = set()
     try:
         await page.goto(url, wait_until="domcontentloaded", timeout=20000)
-        await asyncio.sleep(3)
+        await asyncio.sleep(NAVER_LOAD_WAIT_SEC)
+        try:
+            await page.wait_for_load_state("networkidle", timeout=8000)
+        except Exception:
+            pass
         raw = await page.evaluate(_POWERLINK_JS)
         for href in raw:
             u = normalize_url(href, url)
@@ -325,7 +331,11 @@ async def collect_shopping_store_urls(page, keyword: str, max_results: int = 20,
         page_url = f"{NAVER_SHOPPING_SEARCH}?query={keyword}&pagingIndex={pg}"
         try:
             await page.goto(page_url, wait_until="domcontentloaded", timeout=20000)
-            await asyncio.sleep(3)
+            await asyncio.sleep(NAVER_LOAD_WAIT_SEC)
+            try:
+                await page.wait_for_load_state("networkidle", timeout=8000)
+            except Exception:
+                pass
             raw = await page.evaluate(_SHOPPING_STORE_LINKS_JS)
             before = len(urls)
             for href in raw:
@@ -442,7 +452,12 @@ async def run_crawler(keyword: str, max_sites: int = 40, max_pages: int = 1, ski
     all_urls = set()
     async with async_playwright() as p:
         browser = await p.chromium.launch(headless=True)
-        context = await browser.new_context(user_agent=USER_AGENT)
+        context = await browser.new_context(
+            user_agent=USER_AGENT,
+            locale="ko-KR",
+            timezone_id="Asia/Seoul",
+            viewport={"width": 1280, "height": 720},
+        )
         page = await context.new_page()
 
         try:
