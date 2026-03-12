@@ -126,6 +126,8 @@ NOISE_EMAIL_PATTERNS = {
 
 def _is_noise_email(email: str) -> bool:
     lower = email.lower()
+    if "@" in lower and lower.split("@")[0].startswith("help"):
+        return True
     for noise in NOISE_EMAIL_PATTERNS:
         if noise in lower:
             return True
