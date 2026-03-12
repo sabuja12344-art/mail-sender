@@ -1,0 +1,7 @@
+{
+  "name": "영업메일링",
+  "private": true,
+  "devDependencies": {
+    "supabase": "^1.200.0"
+  }
+}

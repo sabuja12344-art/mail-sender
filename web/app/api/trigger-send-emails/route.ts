@@ -13,15 +13,16 @@ export async function POST(req: Request) {
     );
   }
 
-  let body: { brandIds?: string[]; templateId?: string } = {};
+  let body: { brandIds?: string[]; templateId?: string; fromEmail?: string } = {};
   try {
     body = await req.json().catch(() => ({}));
   } catch { /* ignore */ }
 
   const fnUrl = `${baseUrl.replace(/\/$/, "")}/functions/v1/send-proposal-emails`;
-  const payload: { brandIds?: string[]; templateId?: string } = {};
+  const payload: { brandIds?: string[]; templateId?: string; fromEmail?: string } = {};
   if (Array.isArray(body?.brandIds) && body.brandIds.length > 0) payload.brandIds = body.brandIds;
   if (typeof body?.templateId === "string" && body.templateId.trim()) payload.templateId = body.templateId.trim();
+  if (typeof body?.fromEmail === "string" && body.fromEmail.trim()) payload.fromEmail = body.fromEmail.trim();
 
   const res = await fetch(fnUrl, {
     method: "POST",

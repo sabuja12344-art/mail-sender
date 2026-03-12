@@ -96,10 +96,12 @@ export default function DashboardPage() {
     setAction("send");
     setMessage(null);
     try {
-      const sendBody: { brandIds?: string[]; templateId?: string } = selected.size > 0
+      const sendBody: { brandIds?: string[]; templateId?: string; fromEmail?: string } = selected.size > 0
         ? { brandIds: Array.from(selected) }
         : {};
       if (selectedTemplateId) sendBody.templateId = selectedTemplateId;
+      const selectedTpl = templates.find((t) => t.id === selectedTemplateId);
+      if (selectedTpl?.from_email?.trim()) sendBody.fromEmail = selectedTpl.from_email.trim();
       const res = await fetch("/api/trigger-send-emails", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -109,11 +111,20 @@ export default function DashboardPage() {
       if (!res.ok) throw new Error(data.error || "실행 실패");
       const sent = data.sent ?? 0;
       const errList = Array.isArray(data.errors) ? data.errors as string[] : [];
+      const usedFrom = (data as { used_from?: string }).used_from;
+      const templateFrom = (data as { template_from_email?: string | null }).template_from_email;
       let msg = sent > 0
-        ? `메일 발송 완료: ${sent}건`
+        ? `메일 발송 완료: ${sent}건${usedFrom ? ` (발신: ${usedFrom})` : ""}`
         : (data.message || "발송된 메일이 없습니다.");
+      if (sent > 0 && usedFrom === "onboarding@resend.dev") {
+        msg += "\n\n※ 발신이 onboarding으로 나옵니다. 이메일 템플릿에서 발신 주소를 저장한 뒤 다시 발송하거나, Supabase Edge Function 시크릿에 RESEND_FROM_EMAIL을 설정하세요. (Edge Function 재배포 필요할 수 있음)";
+      }
       if (sent === 0 && errList.length > 0) {
         msg += "\n\n발송 실패 사유:\n" + errList.slice(0, 5).join("\n");
+        const hasDomainError = errList.some((e) => /domain|verified|403|401|authorized/i.test(e));
+        if (hasDomainError) {
+          msg += "\n\n※ Resend 대시보드(https://resend.com/domains)에서 발신 도메인 인증이 완료되었는지 확인하세요. 인증 전에는 onboarding@resend.dev만 사용 가능합니다.";
+        }
       }
       setMessage({ type: sent > 0 ? "ok" : "err", text: msg });
       fetchBrands();
@@ -467,6 +478,9 @@ export default function DashboardPage() {
           border: "1px solid #e9d5ff",
         }}>
           <h3 style={{ marginTop: 0, marginBottom: 16, fontSize: "1.1rem" }}>이메일 템플릿</h3>
+          <p style={{ fontSize: 12, color: "#64748b", marginBottom: 12 }}>
+            여러 명이 쓸 때: 각자 「+ 새 템플릿 추가」로 템플릿을 만든 뒤, 발신 이메일 주소에 본인 이메일을 넣고 저장하세요. 발송 시 「발송 템플릿」에서 해당 템플릿을 선택하면 그 주소로 발송됩니다.
+          </p>
 
           {/* 템플릿 목록 */}
           {templates.length > 0 && (
@@ -522,7 +536,7 @@ export default function DashboardPage() {
               style={{ padding: "8px 12px", border: "1px solid #d4d4d8", borderRadius: 8, width: "100%", maxWidth: 400 }}
             />
             <p style={{ fontSize: 12, color: "#71717a", marginTop: 4 }}>
-              Resend 무료 플랜은 onboarding@resend.dev만 가능. 자체 도메인은 Resend에서 도메인 인증 필요.
+              자체 도메인(예: xxx@one-ad.co.kr) 사용 시 Resend에서 해당 도메인 인증이 완료되어야 발송됩니다. 인증 전에는 onboarding@resend.dev만 사용 가능합니다. Resend → Domains에서 DNS 설정 후 인증 완료하세요.
             </p>
           </div>
 

@@ -1,0 +1,16 @@
+# 크롤러 서비스 전용 Dockerfile (Railway / Render 배포)
+# 빌드: 프로젝트 루트에서 docker build -f Dockerfile.crawler -t crawler .
+# 또는 Railway에서 Dockerfile path = Dockerfile.crawler, Root Directory = . 로 설정
+FROM mcr.microsoft.com/playwright/python:v1.40.0-jammy
+
+WORKDIR /app/crawler
+
+COPY crawler/requirements.txt crawler/brand_crawler.py crawler/server.py ./
+RUN pip install --no-cache-dir -r requirements.txt
+RUN playwright install chromium
+RUN playwright install-deps chromium
+
+ENV PORT=8000
+EXPOSE 8000
+
+CMD ["python", "server.py"]

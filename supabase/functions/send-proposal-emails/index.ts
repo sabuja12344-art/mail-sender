@@ -1,5 +1,5 @@
 // Supabase Edge Function: 발송대기 브랜드에게 템플릿 기반 메일 발송 (Resend)
-// - email_config 테이블에서 템플릿·발신 주소 로드
+// - 발신 주소: 시크릿 RESEND_FROM_EMAIL 우선, 없으면 템플릿 DB의 from_email 사용
 // - status='발송대기'인 brands 조회 → 메일 발송 → status='발송완료'
 
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2.45.0";
@@ -108,7 +108,12 @@ async function sendViaResend(
   });
   if (!res.ok) {
     const text = await res.text();
-    return { ok: false, error: `${res.status}: ${text}` };
+    let errMsg = `${res.status}: ${text}`;
+    try {
+      const json = JSON.parse(text) as { message?: string };
+      if (json?.message) errMsg = `${res.status} - ${json.message}`;
+    } catch { /* keep errMsg */ }
+    return { ok: false, error: errMsg };
   }
   return { ok: true };
 }
@@ -143,6 +148,7 @@ Deno.serve(async (req) => {
 
   let brandIds: string[] = [];
   let templateId: string | null = null;
+  let fromEmailBody: string | null = null;
   try {
     const body = await req.json().catch(() => ({}));
     if (Array.isArray(body?.brandIds) && body.brandIds.length > 0) {
@@ -150,6 +156,9 @@ Deno.serve(async (req) => {
     }
     if (typeof body?.templateId === "string" && body.templateId.trim()) {
       templateId = body.templateId.trim();
+    }
+    if (typeof body?.fromEmail === "string" && body.fromEmail.trim()) {
+      fromEmailBody = body.fromEmail.trim();
     }
   } catch { /* ignore */ }
 
@@ -201,7 +210,10 @@ Deno.serve(async (req) => {
     }
 
     const config = configData as EmailConfig;
-    const fromEmail = config.from_email || "onboarding@resend.dev";
+    // 발신 주소 우선순위: 요청 body fromEmail > 시크릿 RESEND_FROM_EMAIL > 템플릿 DB from_email > 기본값
+    const fromEnv = (Deno.env.get("RESEND_FROM_EMAIL") || "").trim();
+    const fromDb = String(config.from_email ?? "").trim();
+    const fromEmail = fromEmailBody || fromEnv || fromDb || "onboarding@resend.dev";
 
     if (!config.template_html || !config.template_html.trim()) {
       return new Response(
@@ -280,6 +292,8 @@ Deno.serve(async (req) => {
         sent,
         skipped_no_email: noEmail,
         errors: errors.length ? errors : undefined,
+        used_from: fromEmail,
+        template_from_email: fromDb || null,
       }),
       { status: 200, headers: { "Content-Type": "application/json", "Access-Control-Allow-Origin": "*" } }
     );
