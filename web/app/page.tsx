@@ -23,6 +23,12 @@ type EmailConfig = {
   inline_images?: InlineImageItem[];
 };
 
+type EmailTemplate = EmailConfig & {
+  name: string;
+  is_default?: boolean;
+  created_at?: string;
+};
+
 export default function DashboardPage() {
   const [brands, setBrands] = useState<Brand[]>([]);
   const [loading, setLoading] = useState(true);
@@ -30,10 +36,14 @@ export default function DashboardPage() {
   const [message, setMessage] = useState<{ type: "ok" | "err"; text: string } | null>(null);
   const [crawlerKeyword, setCrawlerKeyword] = useState("");
   const [crawlerPages, setCrawlerPages] = useState(1);
+  const [crawlerSkipNoEmail, setCrawlerSkipNoEmail] = useState(false);
 
-  // 이메일 설정
-  const [emailConfig, setEmailConfig] = useState<EmailConfig | null>(null);
+  // 이메일 템플릿 (여러 개)
+  const [templates, setTemplates] = useState<EmailTemplate[]>([]);
+  const [selectedTemplateId, setSelectedTemplateId] = useState<string | "">("");
   const [showTemplate, setShowTemplate] = useState(false);
+  const [editingTemplateId, setEditingTemplateId] = useState<string | "new" | null>(null);
+  const [tplName, setTplName] = useState("");
   const [tplSubject, setTplSubject] = useState("");
   const [tplHtml, setTplHtml] = useState("");
   const [tplFrom, setTplFrom] = useState("");
@@ -45,6 +55,8 @@ export default function DashboardPage() {
 
   // 선택 관리
   const [selected, setSelected] = useState<Set<string>>(new Set());
+  // 테이블 필터: 전체 | 발송완료만
+  const [statusFilter, setStatusFilter] = useState<"전체" | "발송완료">("전체");
 
   const fetchBrands = useCallback(async () => {
     setLoading(true);
@@ -61,16 +73,15 @@ export default function DashboardPage() {
     }
   }, []);
 
-  const fetchEmailConfig = useCallback(async () => {
+  const fetchEmailTemplates = useCallback(async () => {
     try {
-      const res = await fetch("/api/email-config");
+      const res = await fetch("/api/email-templates");
       if (!res.ok) return;
       const data = await res.json();
-      setEmailConfig(data);
-      setTplSubject(data.template_subject || "");
-      setTplHtml(data.template_html || "");
-      setTplFrom(data.from_email || "");
-      setInlineImages(Array.isArray(data.inline_images) ? data.inline_images : []);
+      const list = Array.isArray(data) ? data : [];
+      setTemplates(list);
+      const defaultTpl = list.find((t: EmailTemplate) => t.is_default) || list[0];
+      setSelectedTemplateId(defaultTpl?.id ?? "");
     } catch {
       /* 무시 */
     }
@@ -78,18 +89,35 @@ export default function DashboardPage() {
 
   useEffect(() => {
     fetchBrands();
-    fetchEmailConfig();
-  }, [fetchBrands, fetchEmailConfig]);
+    fetchEmailTemplates();
+  }, [fetchBrands, fetchEmailTemplates]);
 
   const runSendEmails = async () => {
     setAction("send");
     setMessage(null);
     try {
-      const res = await fetch("/api/trigger-send-emails", { method: "POST" });
-      const data = await res.json();
+      const sendBody: { brandIds?: string[]; templateId?: string } = selected.size > 0
+        ? { brandIds: Array.from(selected) }
+        : {};
+      if (selectedTemplateId) sendBody.templateId = selectedTemplateId;
+      const res = await fetch("/api/trigger-send-emails", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(sendBody),
+      });
+      const data = await res.json() as { sent?: number; errors?: string[]; message?: string };
       if (!res.ok) throw new Error(data.error || "실행 실패");
-      setMessage({ type: "ok", text: `메일 발송 완료: ${data.sent ?? 0}건` });
+      const sent = data.sent ?? 0;
+      const errList = Array.isArray(data.errors) ? data.errors as string[] : [];
+      let msg = sent > 0
+        ? `메일 발송 완료: ${sent}건`
+        : (data.message || "발송된 메일이 없습니다.");
+      if (sent === 0 && errList.length > 0) {
+        msg += "\n\n발송 실패 사유:\n" + errList.slice(0, 5).join("\n");
+      }
+      setMessage({ type: sent > 0 ? "ok" : "err", text: msg });
       fetchBrands();
+      fetchEmailTemplates();
     } catch (e) {
       setMessage({ type: "err", text: (e as Error).message });
     } finally {
@@ -104,7 +132,11 @@ export default function DashboardPage() {
       const res = await fetch("/api/run-crawler", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ keyword: crawlerKeyword, pages: crawlerPages }),
+        body: JSON.stringify({
+          keyword: crawlerKeyword,
+          pages: crawlerPages,
+          skipNoEmail: crawlerSkipNoEmail,
+        }),
       });
       const text = await res.text();
       let data: { error?: string; detail?: string; message?: string; insertedCount?: number } = {};
@@ -145,30 +177,118 @@ export default function DashboardPage() {
     fetchBrands();
   };
 
-  // 템플릿 저장
+  // 템플릿 저장 (수정 또는 새로 추가)
   const saveTemplate = async () => {
-    if (!emailConfig) return;
     setTplSaving(true);
     try {
-      const res = await fetch("/api/email-config", {
-        method: "PUT",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          id: emailConfig.id,
-          template_subject: tplSubject,
-          template_html: tplHtml,
-          from_email: tplFrom,
-          inline_images: inlineImages,
-        }),
-      });
-      const data = await res.json();
-      if (!res.ok) throw new Error(data.error || "저장 실패");
-      setMessage({ type: "ok", text: "이메일 설정이 저장되었습니다." });
-      fetchEmailConfig();
+      if (editingTemplateId && editingTemplateId !== "new") {
+        const res = await fetch("/api/email-templates", {
+          method: "PUT",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            id: editingTemplateId,
+            name: tplName,
+            template_subject: tplSubject,
+            template_html: tplHtml,
+            from_email: tplFrom,
+            inline_images: inlineImages,
+          }),
+        });
+        const data = await res.json();
+        if (!res.ok) throw new Error(data.error || "저장 실패");
+        setMessage({ type: "ok", text: "템플릿이 수정되었습니다." });
+      } else {
+        const res = await fetch("/api/email-templates", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            name: tplName || "새 템플릿",
+            template_subject: tplSubject,
+            template_html: tplHtml,
+            from_email: tplFrom,
+            inline_images: inlineImages,
+            is_default: templates.length === 0,
+          }),
+        });
+        const data = await res.json();
+        if (!res.ok) throw new Error(data.error || "저장 실패");
+        setMessage({ type: "ok", text: "템플릿이 추가되었습니다." });
+      }
+      setEditingTemplateId(null);
+      setTplName("");
+      setTplSubject("");
+      setTplHtml("");
+      setTplFrom("");
+      setInlineImages([]);
+      fetchEmailTemplates();
     } catch (e) {
       setMessage({ type: "err", text: (e as Error).message });
     } finally {
       setTplSaving(false);
+    }
+  };
+
+  const cancelEditTemplate = () => {
+    setEditingTemplateId(null);
+    setTplName("");
+    setTplSubject("");
+    setTplHtml("");
+    setTplFrom("");
+    setInlineImages([]);
+  };
+
+  const startEditTemplate = (t: EmailTemplate) => {
+    setEditingTemplateId(t.id);
+    setTplName(t.name || "");
+    setTplSubject(t.template_subject || "");
+    setTplHtml(t.template_html || "");
+    setTplFrom(t.from_email || "");
+    setInlineImages(Array.isArray(t.inline_images) ? t.inline_images : []);
+  };
+
+  const startNewTemplate = () => {
+    setEditingTemplateId("new");
+    setTplName("");
+    setTplSubject("[제안] {{업체명}} 맞춤 마케팅 제안");
+    setTplHtml("<h2>{{업체명}} 담당자님께</h2>\n<p>안녕하세요.</p>\n<p>맞춤 제안을 드립니다.</p>\n<p>감사합니다.</p>");
+    setTplFrom("onboarding@resend.dev");
+    setInlineImages([]);
+  };
+
+  const deleteTemplate = async (id: string) => {
+    if (!confirm("이 템플릿을 삭제할까요?")) return;
+    try {
+      const res = await fetch(`/api/email-templates?id=${encodeURIComponent(id)}`, { method: "DELETE" });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || "삭제 실패");
+      setMessage({ type: "ok", text: "템플릿이 삭제되었습니다." });
+      if (editingTemplateId === id) {
+        setEditingTemplateId(null);
+        setTplName("");
+        setTplSubject("");
+        setTplHtml("");
+        setTplFrom("");
+        setInlineImages([]);
+      }
+      setSelectedTemplateId((prev) => (prev === id ? "" : prev));
+      fetchEmailTemplates();
+    } catch (e) {
+      setMessage({ type: "err", text: (e as Error).message });
+    }
+  };
+
+  const setDefaultTemplate = async (id: string) => {
+    try {
+      const res = await fetch("/api/email-templates", {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ id, is_default: true }),
+      });
+      if (!res.ok) throw new Error((await res.json()).error || "설정 실패");
+      setMessage({ type: "ok", text: "기본 템플릿으로 설정했습니다." });
+      fetchEmailTemplates();
+    } catch (e) {
+      setMessage({ type: "err", text: (e as Error).message });
     }
   };
 
@@ -181,8 +301,15 @@ export default function DashboardPage() {
     });
   };
 
+  const filteredBrands =
+    statusFilter === "발송완료"
+      ? brands.filter((b) => b.status === "발송완료")
+      : brands;
+  const canSelectBrand = (b: Brand) =>
+    !!b.email && (b.status === "수집완료" || b.status === "발송대기");
+
   const toggleSelectAll = () => {
-    const eligible = brands.filter((b) => b.status === "수집완료" && b.email);
+    const eligible = filteredBrands.filter(canSelectBrand);
     if (selected.size === eligible.length && eligible.length > 0) {
       setSelected(new Set());
     } else {
@@ -205,7 +332,7 @@ export default function DashboardPage() {
     }
   };
 
-  const eligibleCount = brands.filter((b) => b.status === "수집완료" && b.email).length;
+  const eligibleCount = filteredBrands.filter(canSelectBrand).length;
 
   return (
     <main style={{ maxWidth: 1200, margin: "0 auto", padding: 24 }}>
@@ -236,6 +363,10 @@ export default function DashboardPage() {
             onChange={(e) => setCrawlerPages(Math.max(1, Math.min(10, Number(e.target.value) || 1)))}
             style={{ padding: "8px 12px", border: "1px solid #e2e8f0", borderRadius: 8, width: 60, textAlign: "center" }}
           />
+          <label style={{ display: "flex", alignItems: "center", gap: 6, marginLeft: 12, cursor: "pointer", fontSize: 13 }}>
+            <input type="checkbox" checked={crawlerSkipNoEmail} onChange={(e) => setCrawlerSkipNoEmail(e.target.checked)} />
+            <span>이메일 없는 업체는 수집하지 않음</span>
+          </label>
           <button
             onClick={runCrawler}
             disabled={action !== "idle"}
@@ -265,6 +396,22 @@ export default function DashboardPage() {
         >
           선택 → 발송대기 ({selected.size}건)
         </button>
+        {templates.length > 1 && (
+          <label style={{ display: "flex", alignItems: "center", gap: 6, fontSize: 13 }}>
+            <span style={{ color: "#64748b" }}>발송 템플릿:</span>
+            <select
+              value={selectedTemplateId}
+              onChange={(e) => setSelectedTemplateId(e.target.value)}
+              style={{ padding: "6px 10px", borderRadius: 8, border: "1px solid #e2e8f0", minWidth: 140 }}
+            >
+              {templates.map((t) => (
+                <option key={t.id} value={t.id}>
+                  {t.name}{t.is_default ? " (기본)" : ""}
+                </option>
+              ))}
+            </select>
+          </label>
+        )}
         <button
           onClick={runSendEmails}
           disabled={action !== "idle"}
@@ -312,17 +459,61 @@ export default function DashboardPage() {
         </p>
       )}
 
-      {/* 이메일 템플릿 에디터 */}
+      {/* 이메일 템플릿 (여러 개) */}
       {showTemplate && (
         <section style={{
           marginBottom: 24, padding: 24,
           background: "#faf5ff", borderRadius: 12,
           border: "1px solid #e9d5ff",
         }}>
-          <h3 style={{ marginTop: 0, marginBottom: 16, fontSize: "1.1rem" }}>이메일 템플릿 설정</h3>
+          <h3 style={{ marginTop: 0, marginBottom: 16, fontSize: "1.1rem" }}>이메일 템플릿</h3>
 
-          <div style={{ marginBottom: 16 }}>
-            <label style={{ fontWeight: 600, display: "block", marginBottom: 4 }}>발신 이메일 주소</label>
+          {/* 템플릿 목록 */}
+          {templates.length > 0 && (
+            <div style={{ marginBottom: 20 }}>
+              <div style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap", marginBottom: 8 }}>
+                {templates.map((t) => (
+                  <div
+                    key={t.id}
+                    style={{
+                      display: "flex",
+                      alignItems: "center",
+                      gap: 8,
+                      padding: "8px 12px",
+                      background: editingTemplateId === t.id ? "#ede9fe" : "#f5f3ff",
+                      borderRadius: 8,
+                      border: editingTemplateId === t.id ? "2px solid #7c3aed" : "1px solid #e9d5ff",
+                    }}
+                  >
+                    <span style={{ fontWeight: 600, fontSize: 13 }}>{t.name}{t.is_default ? " (기본)" : ""}</span>
+                    <button type="button" onClick={() => startEditTemplate(t)} style={{ padding: "4px 8px", fontSize: 12, cursor: "pointer", border: "1px solid #a78bfa", borderRadius: 6, background: "#fff" }}>편집</button>
+                    {!t.is_default && (
+                      <button type="button" onClick={() => setDefaultTemplate(t.id)} style={{ padding: "4px 8px", fontSize: 12, cursor: "pointer", border: "1px solid #a78bfa", borderRadius: 6, background: "#fff" }}>기본으로</button>
+                    )}
+                    <button type="button" onClick={() => deleteTemplate(t.id)} style={{ padding: "4px 8px", fontSize: 12, cursor: "pointer", border: "1px solid #f87171", borderRadius: 6, background: "#fef2f2", color: "#991b1b" }}>삭제</button>
+                  </div>
+                ))}
+              </div>
+              <button type="button" onClick={startNewTemplate} style={{ padding: "8px 14px", fontSize: 13, cursor: "pointer", border: "1px dashed #a78bfa", borderRadius: 8, background: "#fff", color: "#6d28d9", fontWeight: 600 }}>+ 새 템플릿 추가</button>
+            </div>
+          )}
+
+          {/* 편집/추가 폼 */}
+          {(editingTemplateId !== null || templates.length === 0) && (
+            <>
+              <h4 style={{ marginBottom: 12, fontSize: "0.95rem" }}>{editingTemplateId && editingTemplateId !== "new" ? "템플릿 수정" : "새 템플릿 추가"}</h4>
+              <div style={{ marginBottom: 16 }}>
+                <label style={{ fontWeight: 600, display: "block", marginBottom: 4 }}>템플릿 이름</label>
+                <input
+                  type="text"
+                  value={tplName}
+                  onChange={(e) => setTplName(e.target.value)}
+                  placeholder="예: 기본 제안서, A팀용 등"
+                  style={{ padding: "8px 12px", border: "1px solid #d4d4d8", borderRadius: 8, width: "100%", maxWidth: 320 }}
+                />
+              </div>
+              <div style={{ marginBottom: 16 }}>
+                <label style={{ fontWeight: 600, display: "block", marginBottom: 4 }}>발신 이메일 주소</label>
             <input
               type="email"
               value={tplFrom}
@@ -536,18 +727,27 @@ export default function DashboardPage() {
             />
           </div>
 
-          <button
-            onClick={saveTemplate}
-            disabled={tplSaving}
-            style={{
-              padding: "10px 24px",
-              background: tplSaving ? "#94a3b8" : "#7c3aed",
-              color: "#fff", border: "none", borderRadius: 8,
-              cursor: tplSaving ? "not-allowed" : "pointer", fontWeight: 600,
-            }}
-          >
-            {tplSaving ? "저장 중…" : "설정 저장"}
-          </button>
+          <div style={{ display: "flex", gap: 12, flexWrap: "wrap" }}>
+            <button
+              onClick={saveTemplate}
+              disabled={tplSaving}
+              style={{
+                padding: "10px 24px",
+                background: tplSaving ? "#94a3b8" : "#7c3aed",
+                color: "#fff", border: "none", borderRadius: 8,
+                cursor: tplSaving ? "not-allowed" : "pointer", fontWeight: 600,
+              }}
+            >
+              {tplSaving ? "저장 중…" : editingTemplateId && editingTemplateId !== "new" ? "수정 저장" : "템플릿 추가"}
+            </button>
+            {(editingTemplateId !== null || templates.length > 0) && (
+              <button type="button" onClick={cancelEditTemplate} style={{ padding: "10px 24px", background: "#e2e8f0", color: "#475569", border: "none", borderRadius: 8, cursor: "pointer", fontWeight: 600 }}>
+                취소
+              </button>
+            )}
+          </div>
+            </>
+          )}
         </section>
       )}
 
@@ -565,12 +765,51 @@ export default function DashboardPage() {
         </div>
       )}
 
+      {/* 목록 필터: 전체 | 발송완료만 */}
+      {!loading && brands.length > 0 && (
+        <div style={{ marginBottom: 12, display: "flex", alignItems: "center", gap: 8 }}>
+          <span style={{ fontWeight: 600, fontSize: 13 }}>표시:</span>
+          <button
+            type="button"
+            onClick={() => setStatusFilter("전체")}
+            style={{
+              padding: "6px 14px",
+              borderRadius: 8,
+              border: "1px solid #e2e8f0",
+              background: statusFilter === "전체" ? "#e2e8f0" : "#fff",
+              cursor: "pointer",
+              fontWeight: statusFilter === "전체" ? 600 : 400,
+            }}
+          >
+            전체
+          </button>
+          <button
+            type="button"
+            onClick={() => setStatusFilter("발송완료")}
+            style={{
+              padding: "6px 14px",
+              borderRadius: 8,
+              border: "1px solid #e2e8f0",
+              background: statusFilter === "발송완료" ? "#dcfce7" : "#fff",
+              cursor: "pointer",
+              fontWeight: statusFilter === "발송완료" ? 600 : 400,
+            }}
+          >
+            발송완료만
+          </button>
+        </div>
+      )}
+
       {/* 브랜드 테이블 */}
       {loading ? (
         <p>목록 조회 중…</p>
       ) : brands.length === 0 ? (
         <p style={{ color: "#64748b" }}>
           브랜드가 없습니다. 위에서 키워드를 입력하고 「수집 실행」 후 1~2분 뒤 새로고침하세요.
+        </p>
+      ) : filteredBrands.length === 0 ? (
+        <p style={{ color: "#64748b" }}>
+          {statusFilter === "발송완료" ? "발송완료 건이 없습니다." : "표시할 브랜드가 없습니다."}
         </p>
       ) : (
         <div style={{ overflowX: "auto", background: "#fff", borderRadius: 12, boxShadow: "0 1px 3px rgba(0,0,0,0.1)" }}>
@@ -582,7 +821,7 @@ export default function DashboardPage() {
                     type="checkbox"
                     checked={eligibleCount > 0 && selected.size === eligibleCount}
                     onChange={toggleSelectAll}
-                    title="이메일 있는 수집완료 전체 선택"
+                    title="이메일 있는 수집완료·발송대기 선택 (재발송 가능)"
                   />
                 </th>
                 <th style={{ padding: "12px 16px", borderBottom: "1px solid #e2e8f0" }}>키워드</th>
@@ -594,9 +833,9 @@ export default function DashboardPage() {
               </tr>
             </thead>
             <tbody>
-              {brands.map((b) => {
+              {filteredBrands.map((b) => {
                 const sc = statusColor(b.status);
-                const canSelect = b.status === "수집완료" && !!b.email;
+                const canSelect = canSelectBrand(b);
                 return (
                   <tr key={b.id} style={{ borderBottom: "1px solid #f1f5f9", background: selected.has(b.id) ? "#fefce8" : undefined }}>
                     <td style={{ padding: "12px 8px", textAlign: "center" }}>

@@ -2,7 +2,7 @@ import { NextResponse } from "next/server";
 
 export const dynamic = "force-dynamic";
 
-export async function POST() {
+export async function POST(req: Request) {
   const baseUrl = process.env.SUPABASE_URL;
   const key = process.env.SUPABASE_SERVICE_ROLE_KEY;
 
@@ -13,7 +13,15 @@ export async function POST() {
     );
   }
 
+  let body: { brandIds?: string[]; templateId?: string } = {};
+  try {
+    body = await req.json().catch(() => ({}));
+  } catch { /* ignore */ }
+
   const fnUrl = `${baseUrl.replace(/\/$/, "")}/functions/v1/send-proposal-emails`;
+  const payload: { brandIds?: string[]; templateId?: string } = {};
+  if (Array.isArray(body?.brandIds) && body.brandIds.length > 0) payload.brandIds = body.brandIds;
+  if (typeof body?.templateId === "string" && body.templateId.trim()) payload.templateId = body.templateId.trim();
 
   const res = await fetch(fnUrl, {
     method: "POST",
@@ -21,19 +29,20 @@ export async function POST() {
       Authorization: `Bearer ${key}`,
       "Content-Type": "application/json",
     },
+    body: JSON.stringify(payload),
   });
 
   const text = await res.text();
-  let body: unknown;
+  let responseBody: unknown;
   try {
-    body = text ? JSON.parse(text) : {};
+    responseBody = text ? JSON.parse(text) : {};
   } catch {
-    body = { raw: text };
+    responseBody = { raw: text };
   }
 
   if (!res.ok) {
-    return NextResponse.json(body ?? { error: text }, { status: res.status });
+    return NextResponse.json(responseBody ?? { error: text }, { status: res.status });
   }
 
-  return NextResponse.json(body);
+  return NextResponse.json(responseBody);
 }

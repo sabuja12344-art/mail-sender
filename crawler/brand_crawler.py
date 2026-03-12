@@ -415,7 +415,7 @@ async def _deep_search_email(page, base_url: str) -> str | None:
     return None
 
 
-async def run_crawler(keyword: str, max_sites: int = 40, max_pages: int = 1):
+async def run_crawler(keyword: str, max_sites: int = 40, max_pages: int = 1, skip_no_email: bool = False):
     if not keyword:
         keyword = "자사몰"
     keyword = keyword.strip()
@@ -465,6 +465,7 @@ async def run_crawler(keyword: str, max_sites: int = 40, max_pages: int = 1):
     inserted = 0
     skipped_dup = 0
     skipped_sent = 0
+    skipped_no_email = 0
     async with async_playwright() as p:
         browser = await p.chromium.launch(headless=True)
         context = await browser.new_context(user_agent=USER_AGENT)
@@ -515,6 +516,11 @@ async def run_crawler(keyword: str, max_sites: int = 40, max_pages: int = 1):
                 if email:
                     print(f"      → 하위 페이지에서 발견: {email}")
 
+            if skip_no_email and not email:
+                skipped_no_email += 1
+                print(f"      → 스킵 (이메일 없음, 수집 안 함 옵션)")
+                continue
+
             row = {
                 "name": name or urlparse(final_url).netloc or "Unknown",
                 "website_url": final_url,
@@ -535,7 +541,7 @@ async def run_crawler(keyword: str, max_sites: int = 40, max_pages: int = 1):
 
         await browser.close()
 
-    print(f"[3/3] 완료. 신규 {inserted}건 저장, 중복 스킵 {skipped_dup}건, 이미 발송 스킵 {skipped_sent}건, 비업체 제외 {skipped_excluded}건.")
+    print(f"[3/3] 완료. 신규 {inserted}건 저장, 중복 스킵 {skipped_dup}건, 이미 발송 스킵 {skipped_sent}건, 비업체 제외 {skipped_excluded}건" + (f", 이메일 없음 스킵 {skipped_no_email}건." if skip_no_email else "."))
     print(f"INSERTED_COUNT={inserted}")
     return inserted
 
@@ -546,8 +552,9 @@ def main():
     parser.add_argument("keyword", nargs="?", default="자사몰", help="검색 키워드")
     parser.add_argument("--pages", type=int, default=1, help="쇼핑검색 페이지 수 (기본 1)")
     parser.add_argument("--max", type=int, default=40, help="최대 수집 건수 (기본 40)")
+    parser.add_argument("--skip-no-email", action="store_true", help="이메일이 없는 업체는 DB에 저장하지 않음")
     args = parser.parse_args()
-    asyncio.run(run_crawler(keyword=args.keyword, max_sites=args.max, max_pages=args.pages))
+    asyncio.run(run_crawler(keyword=args.keyword, max_sites=args.max, max_pages=args.pages, skip_no_email=args.skip_no_email))
 
 
 if __name__ == "__main__":

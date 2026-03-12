@@ -14,6 +14,7 @@ export async function POST(req: Request) {
     const body = await req.json().catch(() => ({}));
     const keyword = typeof body?.keyword === "string" ? body.keyword.trim() : "";
     const pages = typeof body?.pages === "number" && body.pages >= 1 ? Math.min(body.pages, 10) : 1;
+    const skipNoEmail = !!body?.skipNoEmail;
 
     const projectRoot = path.resolve(process.cwd(), "..");
     const scriptPath = path.join(projectRoot, "crawler", "brand_crawler.py");
@@ -26,6 +27,7 @@ export async function POST(req: Request) {
     }
     const baseArgs = keyword ? [scriptRel, keyword] : [scriptRel];
     const extraArgs = pages > 1 ? ["--pages", String(pages)] : [];
+    if (skipNoEmail) extraArgs.push("--skip-no-email");
     const args = [...baseArgs, ...extraArgs];
     const argsStr = args.map((a) => `"${String(a).replace(/"/g, '\\"')}"`).join(" ");
 

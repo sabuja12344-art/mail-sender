@@ -141,26 +141,63 @@ Deno.serve(async (req) => {
     );
   }
 
+  let brandIds: string[] = [];
+  let templateId: string | null = null;
+  try {
+    const body = await req.json().catch(() => ({}));
+    if (Array.isArray(body?.brandIds) && body.brandIds.length > 0) {
+      brandIds = body.brandIds.filter((id: unknown) => typeof id === "string");
+    }
+    if (typeof body?.templateId === "string" && body.templateId.trim()) {
+      templateId = body.templateId.trim();
+    }
+  } catch { /* ignore */ }
+
   const supabase = createClient(supabaseUrl, serviceRoleKey, {
     auth: { persistSession: false, autoRefreshToken: false },
   });
 
   try {
-    // 1) 이메일 설정(템플릿 + 발신 주소) 로드
-    const { data: configData, error: configError } = await supabase
-      .from("email_config")
-      .select("template_subject, template_html, from_email, inline_images")
-      .limit(1)
-      .single();
-
+    // 1) 이메일 템플릿 로드 (templateId 있으면 해당 행, 없으면 기본 템플릿)
+    let configQuery = supabase
+      .from("email_templates")
+      .select("template_subject, template_html, from_email, inline_images");
+    if (templateId) {
+      configQuery = configQuery.eq("id", templateId).limit(1);
+    } else {
+      configQuery = configQuery.eq("is_default", true).limit(1);
+    }
+    let { data: configData, error: configError } = await configQuery.single();
     if (configError || !configData) {
-      return new Response(
-        JSON.stringify({
-          error: "email_config 테이블을 읽을 수 없습니다. SQL을 실행했는지 확인하세요.",
-          detail: configError?.message,
-        }),
-        { status: 500, headers: { "Content-Type": "application/json" } }
-      );
+      if (!templateId) {
+        const fallback = await supabase
+          .from("email_templates")
+          .select("template_subject, template_html, from_email, inline_images")
+          .limit(1)
+          .single();
+        if (!fallback.error && fallback.data) {
+          configData = fallback.data;
+          configError = null;
+        }
+      }
+    }
+    if (configError || !configData) {
+      const fallbackLegacy = await supabase
+        .from("email_config")
+        .select("template_subject, template_html, from_email, inline_images")
+        .limit(1)
+        .single();
+      if (!fallbackLegacy.error && fallbackLegacy.data) {
+        configData = fallbackLegacy.data;
+      } else {
+        return new Response(
+          JSON.stringify({
+            error: "이메일 템플릿을 읽을 수 없습니다. email_templates(또는 email_config) 테이블을 확인하세요.",
+            detail: configError?.message,
+          }),
+          { status: 500, headers: { "Content-Type": "application/json" } }
+        );
+      }
     }
 
     const config = configData as EmailConfig;
@@ -173,11 +210,13 @@ Deno.serve(async (req) => {
       );
     }
 
-    // 2) 발송대기 브랜드 조회
-    const { data: brands, error: fetchError } = await supabase
+    // 2) 발송대기 브랜드 조회 (brandIds 있으면 해당 ID만)
+    let query = supabase
       .from("brands")
       .select("id, name, email, website_url, status")
       .eq("status", "발송대기");
+    if (brandIds.length > 0) query = query.in("id", brandIds);
+    const { data: brands, error: fetchError } = await query;
 
     if (fetchError) {
       return new Response(
