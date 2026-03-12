@@ -105,7 +105,7 @@ export default function DashboardPage() {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(sendBody),
       });
-      const data = await res.json() as { sent?: number; errors?: string[]; message?: string };
+      const data = await res.json() as { sent?: number; errors?: string[]; message?: string; error?: string };
       if (!res.ok) throw new Error(data.error || "실행 실패");
       const sent = data.sent ?? 0;
       const errList = Array.isArray(data.errors) ? data.errors as string[] : [];
