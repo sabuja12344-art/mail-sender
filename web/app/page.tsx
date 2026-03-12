@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState, useCallback } from "react";
+import { useEffect, useState, useCallback, useRef } from "react";
 
 type Brand = {
   id: string;
@@ -37,6 +37,37 @@ export default function DashboardPage() {
   const [crawlerKeyword, setCrawlerKeyword] = useState("");
   const [crawlerPages, setCrawlerPages] = useState(1);
   const [crawlerSkipNoEmail, setCrawlerSkipNoEmail] = useState(false);
+  const [crawlerUrl, setCrawlerUrl] = useState("http://localhost:5000");
+  const [showCrawlerSettings, setShowCrawlerSettings] = useState(false);
+  const [crawlerServerOnline, setCrawlerServerOnline] = useState<boolean | null>(null);
+  const [crawlerElapsed, setCrawlerElapsed] = useState(0);
+  const elapsedRef = useRef<ReturnType<typeof setInterval> | null>(null);
+
+  useEffect(() => {
+    const saved = localStorage.getItem("crawlerUrl");
+    if (saved) setCrawlerUrl(saved);
+  }, []);
+
+  const saveCrawlerUrl = (url: string) => {
+    setCrawlerUrl(url);
+    localStorage.setItem("crawlerUrl", url);
+  };
+
+  const checkCrawlerHealth = useCallback(async () => {
+    try {
+      const res = await fetch(`${crawlerUrl.replace(/\/+$/, "")}/health`, { signal: AbortSignal.timeout(3000) });
+      const d = await res.json();
+      setCrawlerServerOnline(!!d.ok);
+    } catch {
+      setCrawlerServerOnline(false);
+    }
+  }, [crawlerUrl]);
+
+  useEffect(() => {
+    checkCrawlerHealth();
+    const id = setInterval(checkCrawlerHealth, 15000);
+    return () => clearInterval(id);
+  }, [checkCrawlerHealth]);
 
   // 이메일 템플릿 (여러 개)
   const [templates, setTemplates] = useState<EmailTemplate[]>([]);
@@ -137,10 +168,22 @@ export default function DashboardPage() {
   };
 
   const runCrawler = async () => {
+    if (crawlerServerOnline === false) {
+      setMessage({
+        type: "err",
+        text: "크롤러 서버가 꺼져 있습니다.\n\nPC에서 start-crawler.bat을 실행하거나\npython crawler/server.py를 실행한 뒤 다시 시도하세요.",
+      });
+      return;
+    }
+
     setAction("crawler");
     setMessage(null);
+    setCrawlerElapsed(0);
+    elapsedRef.current = setInterval(() => setCrawlerElapsed((p) => p + 1), 1000);
+
     try {
-      const res = await fetch("/api/run-crawler", {
+      const baseUrl = crawlerUrl.replace(/\/+$/, "");
+      const res = await fetch(`${baseUrl}/run`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
@@ -163,8 +206,19 @@ export default function DashboardPage() {
       setMessage({ type: "ok", text: successText });
       fetchBrands();
     } catch (e) {
-      setMessage({ type: "err", text: (e as Error).message });
+      const err = e as Error;
+      if (err.message === "Failed to fetch" || err.name === "TypeError") {
+        setCrawlerServerOnline(false);
+        setMessage({
+          type: "err",
+          text: "크롤러 서버가 꺼져 있습니다.\n\nPC에서 start-crawler.bat을 실행하거나\npython crawler/server.py를 실행한 뒤 다시 시도하세요.",
+        });
+      } else {
+        setMessage({ type: "err", text: err.message });
+      }
     } finally {
+      if (elapsedRef.current) clearInterval(elapsedRef.current);
+      elapsedRef.current = null;
       setAction("idle");
     }
   };
@@ -347,6 +401,10 @@ export default function DashboardPage() {
 
   return (
     <main style={{ maxWidth: 1200, margin: "0 auto", padding: 24 }}>
+      <style>{`
+        @keyframes spin { to { transform: rotate(360deg); } }
+        @keyframes pulse { 0%,100% { opacity:1; } 50% { opacity:0.4; } }
+      `}</style>
       <h1 style={{ marginBottom: 8, fontSize: "1.5rem" }}>영업 메일링 대시보드</h1>
       <p style={{ color: "#64748b", marginBottom: 24 }}>
         브랜드 수집 → 발송 대상 선택 → 이메일 템플릿 작성 → 메일 발송
@@ -356,6 +414,22 @@ export default function DashboardPage() {
       <section style={{ marginBottom: 24 }}>
         <div style={{ display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap", marginBottom: 12 }}>
           <label htmlFor="crawler-keyword" style={{ fontWeight: 600 }}>키워드 수집</label>
+          <span
+            title={crawlerServerOnline === null ? "확인 중..." : crawlerServerOnline ? "크롤러 서버 ON" : "크롤러 서버 OFF"}
+            style={{
+              display: "inline-flex", alignItems: "center", gap: 4,
+              padding: "3px 10px", borderRadius: 12, fontSize: 11, fontWeight: 600,
+              background: crawlerServerOnline ? "#dcfce7" : crawlerServerOnline === false ? "#fee2e2" : "#f1f5f9",
+              color: crawlerServerOnline ? "#166534" : crawlerServerOnline === false ? "#991b1b" : "#64748b",
+            }}
+          >
+            <span style={{
+              width: 7, height: 7, borderRadius: "50%",
+              background: crawlerServerOnline ? "#22c55e" : crawlerServerOnline === false ? "#ef4444" : "#94a3b8",
+              animation: crawlerServerOnline ? "none" : crawlerServerOnline === false ? "none" : "pulse 1.5s infinite",
+            }} />
+            {crawlerServerOnline === null ? "확인 중" : crawlerServerOnline ? "서버 ON" : "서버 OFF"}
+          </span>
           <input
             id="crawler-keyword"
             type="text"
@@ -380,17 +454,79 @@ export default function DashboardPage() {
           </label>
           <button
             onClick={runCrawler}
-            disabled={action !== "idle"}
+            disabled={action !== "idle" || crawlerServerOnline === false}
             style={{
               padding: "10px 20px",
-              background: action === "crawler" ? "#94a3b8" : "#7c3aed",
+              background: crawlerServerOnline === false ? "#d1d5db" : action === "crawler" ? "#94a3b8" : "#7c3aed",
               color: "#fff", border: "none", borderRadius: 8,
-              cursor: action === "idle" ? "pointer" : "not-allowed", fontWeight: 600,
+              cursor: action === "idle" && crawlerServerOnline !== false ? "pointer" : "not-allowed", fontWeight: 600,
             }}
           >
-            {action === "crawler" ? "실행 중…" : `수집 실행 (${crawlerPages}페이지)`}
+            {action === "crawler"
+              ? `수집 중… ${Math.floor(crawlerElapsed / 60)}:${String(crawlerElapsed % 60).padStart(2, "0")}`
+              : crawlerServerOnline === false
+              ? "서버 OFF — 수집 불가"
+              : `수집 실행 (${crawlerPages}페이지)`}
+          </button>
+          <button
+            type="button"
+            onClick={() => setShowCrawlerSettings(!showCrawlerSettings)}
+            style={{ padding: "8px 12px", background: "none", border: "1px solid #e2e8f0", borderRadius: 8, cursor: "pointer", fontSize: 12, color: "#64748b" }}
+          >
+            {showCrawlerSettings ? "설정 닫기" : "크롤러 서버 설정"}
           </button>
         </div>
+        {action === "crawler" && (
+          <div style={{
+            padding: 16, background: "#eff6ff", borderRadius: 8, border: "1px solid #bfdbfe",
+            marginBottom: 12, display: "flex", alignItems: "center", gap: 12,
+          }}>
+            <span style={{
+              display: "inline-block", width: 18, height: 18, border: "3px solid #3b82f6",
+              borderTopColor: "transparent", borderRadius: "50%",
+              animation: "spin 0.8s linear infinite",
+            }} />
+            <div>
+              <div style={{ fontWeight: 600, fontSize: 14, color: "#1e40af" }}>
+                수집 진행 중 — {Math.floor(crawlerElapsed / 60)}분 {crawlerElapsed % 60}초 경과
+              </div>
+              <div style={{ fontSize: 12, color: "#3b82f6", marginTop: 2 }}>
+                키워드: {crawlerKeyword || "자사몰"} / {crawlerPages}페이지 — 완료될 때까지 이 창을 유지하세요
+              </div>
+            </div>
+          </div>
+        )}
+        {showCrawlerSettings && (
+          <div style={{ padding: 12, background: "#f8fafc", borderRadius: 8, border: "1px solid #e2e8f0", marginBottom: 8 }}>
+            <label style={{ fontSize: 13, fontWeight: 600, display: "block", marginBottom: 4 }}>크롤러 서버 URL</label>
+            <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
+              <input
+                type="text"
+                value={crawlerUrl}
+                onChange={(e) => saveCrawlerUrl(e.target.value)}
+                style={{ padding: "6px 10px", border: "1px solid #d4d4d8", borderRadius: 6, width: 280, fontSize: 13 }}
+              />
+              <button
+                type="button"
+                onClick={async () => {
+                  try {
+                    const res = await fetch(`${crawlerUrl.replace(/\/+$/, "")}/health`);
+                    const d = await res.json();
+                    setMessage({ type: "ok", text: d.ok ? "크롤러 서버 연결 성공" : "응답이 올바르지 않습니다." });
+                  } catch {
+                    setMessage({ type: "err", text: "크롤러 서버에 연결할 수 없습니다. 서버가 실행 중인지 확인하세요." });
+                  }
+                }}
+                style={{ padding: "6px 14px", background: "#e2e8f0", border: "none", borderRadius: 6, cursor: "pointer", fontSize: 12, fontWeight: 600 }}
+              >
+                연결 테스트
+              </button>
+            </div>
+            <p style={{ fontSize: 11, color: "#94a3b8", marginTop: 4, marginBottom: 0 }}>
+              기본값: http://localhost:5000 — PC에서 python crawler/server.py 또는 start-crawler.bat 실행 필요
+            </p>
+          </div>
+        )}
       </section>
 
       {/* 액션 버튼 */}
