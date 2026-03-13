@@ -225,7 +225,7 @@ _POWERLINK_JS = """
     h.includes('local.naver.com') ||
     h.includes('#');
 
-  // 1) "파워링크" 텍스트를 포함한 라벨을 찾아 상위 컨테이너에서 링크 추출
+  // 1) "파워링크" 텍스트를 포함한 라벨을 찾아 상위 컨테이너에서 링크 추출 (페이지 내 모든 파워링크 블록 수집)
   const walker = document.createTreeWalker(document.body, NodeFilter.SHOW_TEXT);
   while (walker.nextNode()) {
     const t = walker.currentNode.textContent.trim();
@@ -241,7 +241,6 @@ _POWERLINK_JS = """
         if (found.length >= 2) { found.forEach(u => urls.push(u)); break; }
         container = container.parentElement;
       }
-      if (urls.length > 0) break;
     }
   }
 
@@ -463,9 +462,9 @@ async def run_crawler(keyword: str, max_sites: int = 40, page_start: int = 1, pa
         print(f"      [DB 조회 경고] {e}")
 
     num_pages = max(1, page_end - page_start + 1)
-    # 페이지 수에 비례해 URL 수집·방문 상한 확대 (1~2페이지만 쓰이던 40개 한계 해소)
-    max_results_per_source = max(max_sites, num_pages * 25)
-    visit_limit = max(max_sites, num_pages * 30)
+    # 페이지 수에 비례해 URL 수집·방문 상한 확대 (20페이지면 소스당 600개·최대 800개 방문)
+    max_results_per_source = max(max_sites, num_pages * 50)
+    visit_limit = max(max_sites, num_pages * 40)
 
     all_urls = set()
     async with async_playwright() as p:
