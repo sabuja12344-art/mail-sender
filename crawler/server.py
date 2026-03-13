@@ -31,7 +31,7 @@ def run():
     try:
         data = request.get_json(force=True, silent=True) or {}
         keyword = (data.get("keyword") or "").strip() or "자사몰"
-        pages = max(1, min(10, int(data.get("pages") or 1)))
+        pages = max(1, min(20, int(data.get("pages") or 1)))
         skip_no_email = bool(data.get("skipNoEmail"))
 
         old_stdout = sys.stdout

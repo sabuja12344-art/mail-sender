@@ -459,11 +459,32 @@ export default function DashboardPage() {
             id="crawler-pages"
             type="number"
             min={1}
-            max={10}
+            max={20}
             value={crawlerPages}
-            onChange={(e) => setCrawlerPages(Math.max(1, Math.min(10, Number(e.target.value) || 1)))}
-            style={{ padding: "8px 12px", border: "1px solid #e2e8f0", borderRadius: 8, width: 60, textAlign: "center" }}
+            onChange={(e) => setCrawlerPages(Math.max(1, Math.min(20, Number(e.target.value) || 1)))}
+            style={{ padding: "8px 12px", border: "1px solid #e2e8f0", borderRadius: 8, width: 52, textAlign: "center" }}
           />
+          <span style={{ display: "flex", alignItems: "center", gap: 4, marginLeft: 4 }}>
+            {[3, 5, 10, 15, 20].map((n) => (
+              <button
+                key={n}
+                type="button"
+                onClick={() => setCrawlerPages(n)}
+                style={{
+                  padding: "6px 10px",
+                  borderRadius: 6,
+                  border: "1px solid #e2e8f0",
+                  background: crawlerPages === n ? "#ede9fe" : "#fff",
+                  color: crawlerPages === n ? "#5b21b6" : "#475569",
+                  fontWeight: crawlerPages === n ? 600 : 400,
+                  cursor: "pointer",
+                  fontSize: 12,
+                }}
+              >
+                {n}페이지
+              </button>
+            ))}
+          </span>
           <label style={{ display: "flex", alignItems: "center", gap: 6, marginLeft: 12, cursor: "pointer", fontSize: 13 }}>
             <input type="checkbox" checked={crawlerSkipNoEmail} onChange={(e) => setCrawlerSkipNoEmail(e.target.checked)} />
             <span>이메일 없는 업체는 수집하지 않음</span>
