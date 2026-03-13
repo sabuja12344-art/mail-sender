@@ -462,6 +462,11 @@ async def run_crawler(keyword: str, max_sites: int = 40, page_start: int = 1, pa
     except Exception as e:
         print(f"      [DB 조회 경고] {e}")
 
+    num_pages = max(1, page_end - page_start + 1)
+    # 페이지 수에 비례해 URL 수집·방문 상한 확대 (1~2페이지만 쓰이던 40개 한계 해소)
+    max_results_per_source = max(max_sites, num_pages * 25)
+    visit_limit = max(max_sites, num_pages * 30)
+
     all_urls = set()
     async with async_playwright() as p:
         browser = await p.chromium.launch(headless=True)
@@ -474,9 +479,9 @@ async def run_crawler(keyword: str, max_sites: int = 40, page_start: int = 1, pa
         page = await context.new_page()
 
         try:
-            print(f"[1/3] 네이버 업체 수집: '{keyword}' (파워링크 + 쇼핑 {page_start}~{page_end}페이지)")
-            pl_urls = await collect_powerlink_urls(page, keyword, max_results=max_sites, page_start=page_start, page_end=page_end)
-            shop_urls = await collect_shopping_store_urls(page, keyword, max_results=max_sites, page_start=page_start, page_end=page_end)
+            print(f"[1/3] 네이버 업체 수집: '{keyword}' (파워링크 + 쇼핑 {page_start}~{page_end}페이지, 소스당 최대 {max_results_per_source}개)")
+            pl_urls = await collect_powerlink_urls(page, keyword, max_results=max_results_per_source, page_start=page_start, page_end=page_end)
+            shop_urls = await collect_shopping_store_urls(page, keyword, max_results=max_results_per_source, page_start=page_start, page_end=page_end)
             raw_merged = pl_urls | shop_urls
             # canonical 기준 중복 제거 (동일 업체 한 번만)
             seen_key: set[str] = set()
@@ -485,7 +490,7 @@ async def run_crawler(keyword: str, max_sites: int = 40, page_start: int = 1, pa
                 if k and k not in seen_key:
                     seen_key.add(k)
                     all_urls.add(u)
-            print(f"      → 파워링크 {len(pl_urls)}개 + 쇼핑 {len(shop_urls)}개 → 중복 제거 후 {len(all_urls)}개")
+            print(f"      → 파워링크 {len(pl_urls)}개 + 쇼핑 {len(shop_urls)}개 → 중복 제거 후 {len(all_urls)}개 (최대 {visit_limit}개 방문)")
         finally:
             await browser.close()
 
@@ -502,8 +507,8 @@ async def run_crawler(keyword: str, max_sites: int = 40, page_start: int = 1, pa
         visited_canonical: set[str] = set()
         skipped_excluded = 0
 
-        for i, url in enumerate(list(all_urls)[:max_sites]):
-            count_label = f"({i+1}/{min(len(all_urls), max_sites)})"
+        for i, url in enumerate(list(all_urls)[:visit_limit]):
+            count_label = f"({i+1}/{min(len(all_urls), visit_limit)})"
             print(f"[2/3] 방문 {count_label}: {url[:80]}...")
             html, final_url = await fetch_page_content(page, url)
             if not html:
