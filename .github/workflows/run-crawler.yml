@@ -8,8 +8,12 @@ on:
         description: '검색 키워드'
         required: false
         default: '자사몰'
-      pages:
-        description: '쇼핑검색 페이지 수'
+      page_start:
+        description: '쇼핑검색 시작 페이지'
+        required: false
+        default: '1'
+      page_end:
+        description: '쇼핑검색 끝 페이지'
         required: false
         default: '1'
       skip_no_email:
@@ -45,4 +49,4 @@ jobs:
           SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
         run: |
           if [ "${{ github.event.inputs.skip_no_email }}" = "true" ]; then EXTRA="--skip-no-email"; else EXTRA=""; fi
-          python crawler/brand_crawler.py "${{ github.event.inputs.keyword }}" --pages ${{ github.event.inputs.pages }} $EXTRA
+          python crawler/brand_crawler.py "${{ github.event.inputs.keyword }}" --page-start ${{ github.event.inputs.page_start }} --page-end ${{ github.event.inputs.page_end }} $EXTRA

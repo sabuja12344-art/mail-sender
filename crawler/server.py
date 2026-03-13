@@ -17,8 +17,8 @@ CORS(app)
 from brand_crawler import run_crawler
 
 
-def run_crawler_sync(keyword: str, max_sites: int = 40, max_pages: int = 1, skip_no_email: bool = False):
-    return asyncio.run(run_crawler(keyword=keyword, max_sites=max_sites, max_pages=max_pages, skip_no_email=skip_no_email))
+def run_crawler_sync(keyword: str, max_sites: int = 40, page_start: int = 1, page_end: int = 1, skip_no_email: bool = False):
+    return asyncio.run(run_crawler(keyword=keyword, max_sites=max_sites, page_start=page_start, page_end=page_end, skip_no_email=skip_no_email))
 
 
 @app.route("/health", methods=["GET"])
@@ -31,14 +31,17 @@ def run():
     try:
         data = request.get_json(force=True, silent=True) or {}
         keyword = (data.get("keyword") or "").strip() or "자사몰"
-        pages = max(1, min(20, int(data.get("pages") or 1)))
+        page_start = max(1, min(20, int(data.get("pageStart") or data.get("pages") or 1)))
+        page_end = max(1, min(20, int(data.get("pageEnd") or data.get("pages") or 1)))
+        if page_start > page_end:
+            page_start, page_end = page_end, page_start
         skip_no_email = bool(data.get("skipNoEmail"))
 
         old_stdout = sys.stdout
         buf = io.StringIO()
         sys.stdout = buf
         try:
-            inserted = run_crawler_sync(keyword=keyword, max_sites=40, max_pages=pages, skip_no_email=skip_no_email)
+            inserted = run_crawler_sync(keyword=keyword, max_sites=40, page_start=page_start, page_end=page_end, skip_no_email=skip_no_email)
         finally:
             sys.stdout = old_stdout
         log = buf.getvalue()

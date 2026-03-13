@@ -299,37 +299,48 @@ _SHOPPING_STORE_LINKS_JS = """
 """
 
 
-async def collect_powerlink_urls(page, keyword: str, max_results: int = 20) -> set:
-    """네이버 통합검색에서 파워링크(광고) 업체 URL 수집."""
-    # 핵심: where=web이 아니라 통합검색(기본) 사용 — 파워링크는 통합검색에만 노출
-    url = f"{NAVER_WEB_SEARCH}?query={keyword}"
+async def collect_powerlink_urls(page, keyword: str, max_results: int = 20, page_start: int = 1, page_end: int = 1) -> set:
+    """네이버 통합검색에서 파워링크(광고) 업체 URL 수집. 페이지는 하단 페이지 번호(1,2,3...), start=(페이지-1)*10+1."""
     urls = set()
-    try:
-        await page.goto(url, wait_until="domcontentloaded", timeout=20000)
-        await asyncio.sleep(NAVER_LOAD_WAIT_SEC)
+    page_start = max(1, page_start)
+    page_end = max(page_start, page_end)
+    for pg in range(page_start, page_end + 1):
+        start_val = (pg - 1) * 10 + 1
+        url = f"{NAVER_WEB_SEARCH}?query={keyword}&start={start_val}"
         try:
-            await page.wait_for_load_state("networkidle", timeout=8000)
-        except Exception:
-            pass
-        raw = await page.evaluate(_POWERLINK_JS)
-        for href in raw:
-            u = normalize_url(href, url)
-            if u and not is_place_or_map_url(u):
-                urls.add(u)
+            await page.goto(url, wait_until="domcontentloaded", timeout=20000)
+            await asyncio.sleep(NAVER_LOAD_WAIT_SEC)
+            try:
+                await page.wait_for_load_state("networkidle", timeout=8000)
+            except Exception:
+                pass
+            raw = await page.evaluate(_POWERLINK_JS)
+            before = len(urls)
+            for href in raw:
+                u = normalize_url(href, url)
+                if u and not is_place_or_map_url(u):
+                    urls.add(u)
+                if len(urls) >= max_results:
+                    break
+            added = len(urls) - before
+            print(f"      [파워링크 {pg}페이지] {added}개 신규 URL (누적 {len(urls)}개)")
             if len(urls) >= max_results:
                 break
-        print(f"      [파워링크] {len(urls)}개 업체 URL 수집")
-    except PlaywrightTimeout:
-        print("      [파워링크] 타임아웃")
-    except Exception as e:
-        print(f"      [파워링크 오류] {e}")
+        except PlaywrightTimeout:
+            print(f"      [파워링크 {pg}페이지] 타임아웃")
+            break
+        except Exception as e:
+            print(f"      [파워링크 {pg}페이지 오류] {e}")
+            break
     return urls
 
 
-async def collect_shopping_store_urls(page, keyword: str, max_results: int = 20, max_pages: int = 1) -> set:
-    """네이버 쇼핑검색에서 스토어 URL을 여러 페이지에 걸쳐 수집."""
+async def collect_shopping_store_urls(page, keyword: str, max_results: int = 20, page_start: int = 1, page_end: int = 1) -> set:
+    """네이버 쇼핑검색에서 스토어 URL을 지정 페이지 범위(맨 하단 페이지 번호)로 수집."""
     urls = set()
-    for pg in range(1, max_pages + 1):
+    page_start = max(1, page_start)
+    page_end = max(page_start, page_end)
+    for pg in range(page_start, page_end + 1):
         page_url = f"{NAVER_SHOPPING_SEARCH}?query={keyword}&pagingIndex={pg}"
         try:
             await page.goto(page_url, wait_until="domcontentloaded", timeout=20000)
@@ -427,7 +438,7 @@ async def _deep_search_email(page, base_url: str) -> str | None:
     return None
 
 
-async def run_crawler(keyword: str, max_sites: int = 40, max_pages: int = 1, skip_no_email: bool = False):
+async def run_crawler(keyword: str, max_sites: int = 40, page_start: int = 1, page_end: int = 1, skip_no_email: bool = False):
     if not keyword:
         keyword = "자사몰"
     keyword = keyword.strip()
@@ -463,9 +474,9 @@ async def run_crawler(keyword: str, max_sites: int = 40, max_pages: int = 1, ski
         page = await context.new_page()
 
         try:
-            print(f"[1/3] 네이버 업체 수집: '{keyword}' (파워링크 + 쇼핑 {max_pages}페이지)")
-            pl_urls = await collect_powerlink_urls(page, keyword, max_results=max_sites)
-            shop_urls = await collect_shopping_store_urls(page, keyword, max_results=max_sites, max_pages=max_pages)
+            print(f"[1/3] 네이버 업체 수집: '{keyword}' (파워링크 + 쇼핑 {page_start}~{page_end}페이지)")
+            pl_urls = await collect_powerlink_urls(page, keyword, max_results=max_sites, page_start=page_start, page_end=page_end)
+            shop_urls = await collect_shopping_store_urls(page, keyword, max_results=max_sites, page_start=page_start, page_end=page_end)
             raw_merged = pl_urls | shop_urls
             # canonical 기준 중복 제거 (동일 업체 한 번만)
             seen_key: set[str] = set()
@@ -567,11 +578,12 @@ def main():
     import argparse
     parser = argparse.ArgumentParser(description="네이버 브랜드 크롤러")
     parser.add_argument("keyword", nargs="?", default="자사몰", help="검색 키워드")
-    parser.add_argument("--pages", type=int, default=1, help="쇼핑검색 페이지 수 (기본 1)")
+    parser.add_argument("--page-start", type=int, default=1, help="쇼핑검색 시작 페이지 (기본 1)")
+    parser.add_argument("--page-end", type=int, default=1, help="쇼핑검색 끝 페이지 (기본 1)")
     parser.add_argument("--max", type=int, default=40, help="최대 수집 건수 (기본 40)")
     parser.add_argument("--skip-no-email", action="store_true", help="이메일이 없는 업체는 DB에 저장하지 않음")
     args = parser.parse_args()
-    asyncio.run(run_crawler(keyword=args.keyword, max_sites=args.max, max_pages=args.pages, skip_no_email=args.skip_no_email))
+    asyncio.run(run_crawler(keyword=args.keyword, max_sites=args.max, page_start=args.page_start, page_end=args.page_end, skip_no_email=args.skip_no_email))
 
 
 if __name__ == "__main__":

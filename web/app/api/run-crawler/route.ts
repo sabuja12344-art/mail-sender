@@ -13,7 +13,9 @@ export async function POST(req: Request) {
   try {
     const body = await req.json().catch(() => ({}));
     const keyword = typeof body?.keyword === "string" ? body.keyword.trim() : "";
-    const pages = typeof body?.pages === "number" && body.pages >= 1 ? Math.min(body.pages, 10) : 1;
+    let pageStart = typeof body?.pageStart === "number" ? Math.max(1, Math.min(20, body.pageStart)) : 1;
+    let pageEnd = typeof body?.pageEnd === "number" ? Math.max(1, Math.min(20, body.pageEnd)) : (typeof body?.pages === "number" && body.pages >= 1 ? Math.min(body.pages, 20) : 1);
+    if (pageStart > pageEnd) [pageStart, pageEnd] = [pageEnd, pageStart];
     const skipNoEmail = !!body?.skipNoEmail;
 
     // (1) 비용 없음: GitHub Actions로 크롤러 실행
@@ -37,7 +39,8 @@ export async function POST(req: Request) {
               ref: process.env.GITHUB_ACTIONS_CRAWLER_REF?.trim() || "main",
               inputs: {
                 keyword: keyword || "자사몰",
-                pages: String(pages),
+                page_start: String(pageStart),
+                page_end: String(pageEnd),
                 skip_no_email: skipNoEmail ? "true" : "false",
               },
             }),
@@ -68,7 +71,7 @@ export async function POST(req: Request) {
       const res = await fetch(url, {
         method: "POST",
         headers,
-        body: JSON.stringify({ keyword, pages, skipNoEmail }),
+        body: JSON.stringify({ keyword, pageStart, pageEnd, skipNoEmail }),
         signal: AbortSignal.timeout(280000),
       });
       const text = await res.text();
@@ -117,7 +120,7 @@ export async function POST(req: Request) {
       return NextResponse.json({ error: "스크립트 없음", detail: msg }, { status: 500 });
     }
     const baseArgs = keyword ? [scriptRel, keyword] : [scriptRel];
-    const extraArgs = pages > 1 ? ["--pages", String(pages)] : [];
+    const extraArgs = ["--page-start", String(pageStart), "--page-end", String(pageEnd)];
     if (skipNoEmail) extraArgs.push("--skip-no-email");
     const args = [...baseArgs, ...extraArgs];
     const argsStr = args.map((a) => `"${String(a).replace(/"/g, '\\"')}"`).join(" ");

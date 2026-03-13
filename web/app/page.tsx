@@ -35,7 +35,8 @@ export default function DashboardPage() {
   const [action, setAction] = useState<"idle" | "send" | "crawler">("idle");
   const [message, setMessage] = useState<{ type: "ok" | "err"; text: string } | null>(null);
   const [crawlerKeyword, setCrawlerKeyword] = useState("");
-  const [crawlerPages, setCrawlerPages] = useState(1);
+  const [crawlerPageStart, setCrawlerPageStart] = useState(1);
+  const [crawlerPageEnd, setCrawlerPageEnd] = useState(1);
   const [crawlerSkipNoEmail, setCrawlerSkipNoEmail] = useState(false);
   const defaultCrawlerUrl = process.env.NEXT_PUBLIC_CRAWLER_URL?.trim() || "http://localhost:5000";
   const [crawlerUrl, setCrawlerUrl] = useState(defaultCrawlerUrl);
@@ -194,7 +195,8 @@ export default function DashboardPage() {
         headers: { "Content-Type": "application/json", "ngrok-skip-browser-warning": "true" },
         body: JSON.stringify({
           keyword: crawlerKeyword,
-          pages: crawlerPages,
+          pageStart: Math.min(crawlerPageStart, crawlerPageEnd),
+          pageEnd: Math.max(crawlerPageStart, crawlerPageEnd),
           skipNoEmail: crawlerSkipNoEmail,
         }),
       });
@@ -454,36 +456,50 @@ export default function DashboardPage() {
             onChange={(e) => setCrawlerKeyword(e.target.value)}
             style={{ padding: "8px 12px", border: "1px solid #e2e8f0", borderRadius: 8, minWidth: 180 }}
           />
-          <label htmlFor="crawler-pages" style={{ fontWeight: 600, marginLeft: 8 }}>페이지</label>
+          <span style={{ fontWeight: 600, marginLeft: 8 }}>수집: 파워링크 + 쇼핑검색</span>
+          <span style={{ fontSize: 11, color: "#94a3b8", marginLeft: 4 }}>(시작~끝: 둘 다 하단 페이지 번호)</span>
+          <label style={{ fontSize: 12, color: "#64748b" }}>시작</label>
           <input
-            id="crawler-pages"
             type="number"
             min={1}
             max={20}
-            value={crawlerPages}
-            onChange={(e) => setCrawlerPages(Math.max(1, Math.min(20, Number(e.target.value) || 1)))}
-            style={{ padding: "8px 12px", border: "1px solid #e2e8f0", borderRadius: 8, width: 52, textAlign: "center" }}
+            value={crawlerPageStart}
+            onChange={(e) => setCrawlerPageStart(Math.max(1, Math.min(20, Number(e.target.value) || 1)))}
+            style={{ padding: "8px 10px", border: "1px solid #e2e8f0", borderRadius: 8, width: 48, textAlign: "center" }}
+          />
+          <span style={{ color: "#94a3b8" }}>~</span>
+          <label style={{ fontSize: 12, color: "#64748b" }}>끝</label>
+          <input
+            type="number"
+            min={1}
+            max={20}
+            value={crawlerPageEnd}
+            onChange={(e) => setCrawlerPageEnd(Math.max(1, Math.min(20, Number(e.target.value) || 1)))}
+            style={{ padding: "8px 10px", border: "1px solid #e2e8f0", borderRadius: 8, width: 48, textAlign: "center" }}
           />
           <span style={{ display: "flex", alignItems: "center", gap: 4, marginLeft: 4 }}>
-            {[3, 5, 10, 15, 20].map((n) => (
-              <button
-                key={n}
-                type="button"
-                onClick={() => setCrawlerPages(n)}
-                style={{
-                  padding: "6px 10px",
-                  borderRadius: 6,
-                  border: "1px solid #e2e8f0",
-                  background: crawlerPages === n ? "#ede9fe" : "#fff",
-                  color: crawlerPages === n ? "#5b21b6" : "#475569",
-                  fontWeight: crawlerPages === n ? 600 : 400,
-                  cursor: "pointer",
-                  fontSize: 12,
-                }}
-              >
-                {n}페이지
-              </button>
-            ))}
+            {[[1, 5], [1, 10], [1, 20]].map(([s, e]) => {
+              const active = crawlerPageStart === s && crawlerPageEnd === e;
+              return (
+                <button
+                  key={`${s}-${e}`}
+                  type="button"
+                  onClick={() => { setCrawlerPageStart(s); setCrawlerPageEnd(e); }}
+                  style={{
+                    padding: "6px 10px",
+                    borderRadius: 6,
+                    border: "1px solid #e2e8f0",
+                    background: active ? "#ede9fe" : "#fff",
+                    color: active ? "#5b21b6" : "#475569",
+                    fontWeight: active ? 600 : 400,
+                    cursor: "pointer",
+                    fontSize: 12,
+                  }}
+                >
+                  {s}~{e}페이지
+                </button>
+              );
+            })}
           </span>
           <label style={{ display: "flex", alignItems: "center", gap: 6, marginLeft: 12, cursor: "pointer", fontSize: 13 }}>
             <input type="checkbox" checked={crawlerSkipNoEmail} onChange={(e) => setCrawlerSkipNoEmail(e.target.checked)} />
@@ -503,7 +519,7 @@ export default function DashboardPage() {
               ? `수집 중… ${Math.floor(crawlerElapsed / 60)}:${String(crawlerElapsed % 60).padStart(2, "0")}`
               : crawlerServerOnline === false
               ? "서버 OFF — 수집 불가"
-              : `수집 실행 (${crawlerPages}페이지)`}
+              : `수집 실행 (${crawlerPageStart}~${crawlerPageEnd}페이지)`}
           </button>
           <button
             type="button"
@@ -528,7 +544,7 @@ export default function DashboardPage() {
                 수집 진행 중 — {Math.floor(crawlerElapsed / 60)}분 {crawlerElapsed % 60}초 경과
               </div>
               <div style={{ fontSize: 12, color: "#3b82f6", marginTop: 2 }}>
-                키워드: {crawlerKeyword || "자사몰"} / {crawlerPages}페이지 — 완료될 때까지 이 창을 유지하세요
+                키워드: {crawlerKeyword || "자사몰"} · 파워링크·쇼핑검색 {crawlerPageStart}~{crawlerPageEnd}페이지 — 완료될 때까지 이 창을 유지하세요
               </div>
             </div>
           </div>
