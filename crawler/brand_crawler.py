@@ -334,12 +334,36 @@ async def collect_powerlink_urls(page, keyword: str, max_results: int = 20, page
     return urls
 
 
+def _is_shopping_blocked(html: str, current_url: str) -> str | None:
+    """
+    쇼핑 페이지에 방해요소가 있으면 이유 문자열 반환, 정상이면 None.
+    - 네이버 shopping URL을 벗어난 경우 (리다이렉션/캡차)
+    - HTML에 캡차/봇감지 키워드 포함
+    - 상품 목록 컨테이너 자체가 없는 경우
+    """
+    url_lower = current_url.lower()
+    # 쇼핑 검색 URL이 아닌 곳으로 리다이렉션
+    if "search.shopping.naver.com" not in url_lower:
+        return f"쇼핑 URL 이탈 (리다이렉션): {current_url[:80]}"
+    # HTML에 캡차/봇 감지 키워드 포함
+    html_lower = html.lower()
+    block_keywords = [
+        "captcha", "robot", "자동입력 방지", "보안문자",
+        "비정상적인 접근", "비정상 접근", "차단", "blocked",
+        "recaptcha", "사람인지 확인",
+    ]
+    for kw in block_keywords:
+        if kw in html_lower:
+            return f"봇 감지/캡차 페이지 ({kw})"
+    return None
+
+
 async def collect_shopping_store_urls(page, keyword: str, max_results: int = 20, page_start: int = 1, page_end: int = 1) -> tuple[set, bool]:
-    """네이버 쇼핑검색에서 스토어 URL을 지정 페이지 범위로 수집. 오류 시 (빈 set, True) 반환."""
+    """네이버 쇼핑검색에서 스토어 URL을 지정 페이지 범위로 수집. 방해요소/오류 시 (수집한 set, True) 반환."""
     urls = set()
     page_start = max(1, page_start)
     page_end = max(page_start, page_end)
-    consecutive_empty = 0  # 연속 빈 페이지 카운터
+    consecutive_empty = 0
     had_error = False
     for pg in range(page_start, page_end + 1):
         page_url = f"{NAVER_SHOPPING_SEARCH}?query={keyword}&pagingIndex={pg}"
@@ -350,6 +374,16 @@ async def collect_shopping_store_urls(page, keyword: str, max_results: int = 20,
                 await page.wait_for_load_state("networkidle", timeout=6000)
             except Exception:
                 pass
+
+            # ① 방해요소 감지: 현재 URL + HTML 확인
+            current_url = page.url
+            html = await page.content()
+            block_reason = _is_shopping_blocked(html, current_url)
+            if block_reason:
+                print(f"      [쇼핑 {pg}페이지] 방해요소 감지 → 파워링크 전환: {block_reason}")
+                had_error = True
+                break
+
             raw = await page.evaluate(_SHOPPING_STORE_LINKS_JS)
             before = len(urls)
             for href in raw:
@@ -358,24 +392,33 @@ async def collect_shopping_store_urls(page, keyword: str, max_results: int = 20,
                     urls.add(u)
             added = len(urls) - before
             print(f"      [쇼핑 {pg}페이지] {added}개 신규 URL (누적 {len(urls)}개)")
+
+            # ② 첫 페이지에서 URL이 전혀 없으면 즉시 폴백 (방해요소 의심)
+            if pg == page_start and len(urls) == 0:
+                print(f"      [쇼핑] 첫 페이지 수집 결과 0개 — 방해요소 의심, 파워링크 전환")
+                had_error = True
+                break
+
             if added == 0:
                 consecutive_empty += 1
-                if consecutive_empty >= 3:  # 연속 3페이지 빈 경우에만 중단
+                if consecutive_empty >= 3:
                     print(f"      [쇼핑] 연속 3페이지 수집 없음, 중단")
                     break
             else:
                 consecutive_empty = 0
+
             if len(urls) >= max_results:
                 break
         except PlaywrightTimeout:
-            print(f"      [쇼핑 {pg}페이지] 타임아웃 — 쇼핑 수집 중단")
+            print(f"      [쇼핑 {pg}페이지] 타임아웃 — 파워링크 전환")
             had_error = True
             break
         except Exception as e:
-            print(f"      [쇼핑 {pg}페이지 오류] {e} — 쇼핑 수집 중단")
+            print(f"      [쇼핑 {pg}페이지 오류] {e} — 파워링크 전환")
             had_error = True
             break
     return urls, had_error
+
 
 
 async def fetch_page_content(page, url: str):
