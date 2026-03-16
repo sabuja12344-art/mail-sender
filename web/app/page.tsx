@@ -197,7 +197,7 @@ export default function DashboardPage() {
     if (crawlerServerOnline === false) {
       setMessage({
         type: "err",
-        text: "크롤러 서버가 꺼져 있습니다.\n\nPC에서 start-crawler.bat을 실행하거나\npython crawler/server.py를 실행한 뒤 다시 시도하세요.",
+        text: "\ud06c\ub864\ub7ec \uc11c\ubc84\uac00 \uafbc\uc838 \uc788\uc2b5\ub2c8\ub2e4.\n\nPC\uc5d0\uc11c start-crawler.bat\uc744 \uc2e4\ud589\ud558\uac70\ub098\npython crawler/server.py\ub97c \uc2e4\ud589\ud55c \ub4a4 \ub2e4\uc2dc \uc2dc\ub3c4\ud558\uc138\uc694.",
       });
       return;
     }
@@ -208,6 +208,7 @@ export default function DashboardPage() {
     elapsedRef.current = setInterval(() => setCrawlerElapsed((p) => p + 1), 1000);
 
     try {
+      // 1) /run 호출 — 즉시 응답 (백그라운드에서 크롤링 시작)
       const proxyUrl = `/api/crawler-proxy?url=${encodeURIComponent(crawlerUrl)}&path=run`;
       const res = await fetch(proxyUrl, {
         method: "POST",
@@ -219,26 +220,49 @@ export default function DashboardPage() {
           skipNoEmail: crawlerSkipNoEmail,
         }),
       });
-      const text = await res.text();
-      let data: { error?: string; detail?: string; message?: string; insertedCount?: number } = {};
-      try { data = text ? JSON.parse(text) : {}; } catch { data = { error: "응답 파싱 실패", detail: text.slice(0, 500) }; }
-      if (!res.ok) {
-        const errMsg = data.detail ? `${data.error || "실행 실패"}\n${data.detail}` : (data.error || "실행 실패");
-        throw new Error(errMsg);
+      const startData = await res.json() as { ok?: boolean; error?: string; message?: string };
+      if (!res.ok || !startData.ok) {
+        throw new Error(startData.error || "\ud06c\ub864\ub7ec \uc2dc\uc791 \uc2e4\ud328");
       }
-      const successText =
-        typeof data.insertedCount === "number"
-          ? `${data.insertedCount}개가 정상 수집되었습니다.`
-          : (data.message ?? "크롤러 완료.");
-      setMessage({ type: "ok", text: successText });
-      fetchBrands();
+
+      // 2) /status 폴링 — 완료될 때까지 3초마다 확인
+      const pollStatus = async (): Promise<void> => {
+        const statusUrl = `/api/crawler-proxy?url=${encodeURIComponent(crawlerUrl)}&path=status`;
+        const sRes = await fetch(statusUrl);
+        const s = await sRes.json() as {
+          running: boolean;
+          inserted: number;
+          message: string;
+          error: string | null;
+        };
+
+        if (s.running) {
+          // 아직 실행 중 → 3초 후 다시 확인
+          await new Promise((r) => setTimeout(r, 3000));
+          return pollStatus();
+        }
+
+        // 완료
+        if (s.error) {
+          throw new Error(s.error);
+        }
+        const successText =
+          typeof s.inserted === "number"
+            ? `${s.inserted}\uac1c\uac00 \uc815\uc0c1 \uc218\uc9d1\ub418\uc5c8\uc2b5\ub2c8\ub2e4.`
+            : (s.message ?? "\ud06c\ub864\ub7ec \uc644\ub8cc.");
+        setMessage({ type: "ok", text: successText });
+        fetchBrands();
+      };
+
+      await pollStatus();
+
     } catch (e) {
       const err = e as Error;
       if (err.message === "Failed to fetch" || err.name === "TypeError") {
         setCrawlerServerOnline(false);
         setMessage({
           type: "err",
-          text: "크롤러 서버가 꺼져 있습니다.\n\nPC에서 start-crawler.bat을 실행하거나\npython crawler/server.py를 실행한 뒤 다시 시도하세요.",
+          text: "\ud06c\ub864\ub7ec \uc11c\ubc84\uac00 \uafbc\uc838 \uc788\uc2b5\ub2c8\ub2e4.\n\nPC\uc5d0\uc11c start-crawler.bat\uc744 \uc2e4\ud589\ud558\uac70\ub098\npython crawler/server.py\ub97c \uc2e4\ud589\ud55c \ub4a4 \ub2e4\uc2dc \uc2dc\ub3c4\ud558\uc138\uc694.",
         });
       } else {
         setMessage({ type: "err", text: err.message });
@@ -249,6 +273,7 @@ export default function DashboardPage() {
       setAction("idle");
     }
   };
+
 
   // 선택한 브랜드를 발송대기로 변경
   const setSelectedToReady = async () => {
