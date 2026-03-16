@@ -912,7 +912,7 @@ export default function DashboardPage() {
                   inlineImages.forEach((img) => {
                     const cid = esc(img.content_id);
                     const url = img.url.replace(/"/g, "&quot;");
-                    const dims = [];
+                    const dims: string[] = [];
                     if (img.width && img.width > 0) dims.push(`width="${img.width}"`);
                     if (img.height && img.height > 0) dims.push(`height="${img.height}"`);
                     const dimStr = dims.length ? ` ${dims.join(" ")}` : "";
@@ -926,6 +926,16 @@ export default function DashboardPage() {
                   };
                   html = html.replace(/src=["']cid:([^"']+)["']/gi, (_, id) => `src="${resolveCid(id)}"`);
                   html = html.replace(/src=cid:([^\s>]+)/gi, (_, id) => `src="${resolveCid(id)}"`);
+                  // HTML 태그가 전혀 없는 순수 텍스트인 경우에만: 엔터(\n)를 <br />로 치환해서 줄바꿈 미리보기
+                  if (!/<[^>]+>/.test(html)) {
+                    html = html
+                      .replace(/&/g, "&amp;")
+                      .replace(/</g, "&lt;")
+                      .replace(/>/g, "&gt;")
+                      .replace(/"/g, "&quot;")
+                      .replace(/'/g, "&#39;")
+                      .replace(/\r?\n/g, "<br />");
+                  }
                   return html;
                 })(),
               }}
