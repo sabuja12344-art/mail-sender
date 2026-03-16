@@ -408,7 +408,7 @@ export default function DashboardPage() {
     return list;
   })();
   const canSelectBrand = (b: Brand) =>
-    !!b.email && (b.status === "수집완료" || b.status === "발송대기");
+    !!b.email && (b.status === "\uc218\uc9d1\uc644\ub8cc" || b.status === "\ubc1c\uc1a1\ub300\uae30" || b.status === "\ubc1c\uc1a1\uc644\ub8cc");
 
   const toggleSelectAll = () => {
     const eligible = filteredBrands.filter(canSelectBrand);
