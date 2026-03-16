@@ -44,6 +44,7 @@ export default function DashboardPage() {
   const [crawlerServerOnline, setCrawlerServerOnline] = useState<boolean | null>(null);
   const [crawlerElapsed, setCrawlerElapsed] = useState(0);
   const elapsedRef = useRef<ReturnType<typeof setInterval> | null>(null);
+  const [startingServer, setStartingServer] = useState(false);
 
   useEffect(() => {
     const saved = localStorage.getItem("crawlerUrl");
@@ -58,9 +59,9 @@ export default function DashboardPage() {
 
   const checkCrawlerHealth = useCallback(async () => {
     try {
-      const res = await fetch(`${crawlerUrl.replace(/\/+$/, "")}/health`, {
-        signal: AbortSignal.timeout(3000),
-        headers: { "ngrok-skip-browser-warning": "true" },
+      const proxyUrl = `/api/crawler-proxy?url=${encodeURIComponent(crawlerUrl)}&path=health`;
+      const res = await fetch(proxyUrl, {
+        signal: AbortSignal.timeout(5000),
       });
       const d = await res.json();
       setCrawlerServerOnline(!!d.ok);
@@ -68,6 +69,24 @@ export default function DashboardPage() {
       setCrawlerServerOnline(false);
     }
   }, [crawlerUrl]);
+
+  const startCrawlerServer = async () => {
+    setStartingServer(true);
+    setMessage(null);
+    try {
+      const res = await fetch("/api/start-crawler-server", { method: "POST" });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || "서버 시작 실패");
+      setMessage({ type: "ok", text: data.message || "크롤러 서버를 시작했습니다. 잠시 후 서버 ON으로 바뀝니다." });
+      // 3초 후 health 재확인
+      setTimeout(checkCrawlerHealth, 3000);
+      setTimeout(checkCrawlerHealth, 6000);
+    } catch (e) {
+      setMessage({ type: "err", text: (e as Error).message });
+    } finally {
+      setStartingServer(false);
+    }
+  };
 
   useEffect(() => {
     checkCrawlerHealth();
@@ -189,10 +208,10 @@ export default function DashboardPage() {
     elapsedRef.current = setInterval(() => setCrawlerElapsed((p) => p + 1), 1000);
 
     try {
-      const baseUrl = crawlerUrl.replace(/\/+$/, "");
-      const res = await fetch(`${baseUrl}/run`, {
+      const proxyUrl = `/api/crawler-proxy?url=${encodeURIComponent(crawlerUrl)}&path=run`;
+      const res = await fetch(proxyUrl, {
         method: "POST",
-        headers: { "Content-Type": "application/json", "ngrok-skip-browser-warning": "true" },
+        headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           keyword: crawlerKeyword,
           pageStart: Math.min(crawlerPageStart, crawlerPageEnd),
@@ -521,6 +540,25 @@ export default function DashboardPage() {
               ? "서버 OFF — 수집 불가"
               : `수집 실행 (${crawlerPageStart}~${crawlerPageEnd}페이지)`}
           </button>
+          {crawlerServerOnline === false && (
+            <button
+              type="button"
+              onClick={startCrawlerServer}
+              disabled={startingServer}
+              style={{
+                padding: "8px 16px",
+                background: startingServer ? "#94a3b8" : "#16a34a",
+                color: "#fff",
+                border: "none",
+                borderRadius: 8,
+                cursor: startingServer ? "not-allowed" : "pointer",
+                fontWeight: 600,
+                fontSize: 13,
+              }}
+            >
+              {startingServer ? "시작 중…" : "🟢 서버 시작"}
+            </button>
+          )}
           <button
             type="button"
             onClick={() => setShowCrawlerSettings(!showCrawlerSettings)}
