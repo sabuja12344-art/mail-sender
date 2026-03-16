@@ -72,20 +72,35 @@ function escapeHtml(s: string): string {
     .replace(/"/g, "&quot;");
 }
 
-function buildAttachments(inlineImages: InlineImage[]): { filename: string; path: string; content_id: string }[] {
+async function buildAttachmentsWithContent(
+  inlineImages: InlineImage[]
+): Promise<{ filename: string; content: string; content_id: string }[]> {
   if (!Array.isArray(inlineImages) || inlineImages.length === 0) return [];
-  return inlineImages
-    .filter((img) => img?.content_id && img?.url)
-    .map((img) => {
+  const results: { filename: string; content: string; content_id: string }[] = [];
+  for (const img of inlineImages) {
+    if (!img?.content_id || !img?.url) continue;
+    try {
+      const res = await fetch(img.url);
+      if (!res.ok) {
+        console.warn(`이미지 fetch 실패 (${img.content_id}): ${res.status}`);
+        continue;
+      }
+      const arrayBuffer = await res.arrayBuffer();
+      const base64 = btoa(String.fromCharCode(...new Uint8Array(arrayBuffer)));
       const ext = img.url.split(".").pop()?.split("?")[0]?.toLowerCase();
       const safeExt = ["png", "jpg", "jpeg", "gif", "webp"].includes(ext || "") ? ext : "png";
-      return {
+      results.push({
         filename: `${img.content_id}.${safeExt}`,
-        path: img.url,
+        content: base64,
         content_id: img.content_id,
-      };
-    });
+      });
+    } catch (e) {
+      console.warn(`이미지 변환 실패 (${img.content_id}):`, e);
+    }
+  }
+  return results;
 }
+
 
 async function sendViaResend(
   apiKey: string,
@@ -93,7 +108,7 @@ async function sendViaResend(
   to: string,
   subject: string,
   html: string,
-  attachments: { filename: string; path: string; content_id: string }[] = []
+  attachments: { filename: string; content: string; content_id: string }[] = []
 ): Promise<{ ok: boolean; error?: string }> {
   const body: Record<string, unknown> = { from, to, subject, html };
   if (attachments.length > 0) body.attachments = attachments;
@@ -258,7 +273,7 @@ Deno.serve(async (req) => {
     let sent = 0;
     const errors: string[] = [];
 
-    const attachments = buildAttachments(config.inline_images || []);
+    const attachments = await buildAttachmentsWithContent(config.inline_images || []);
 
     for (const brand of toSend) {
       const email = (brand.email ?? "").trim();

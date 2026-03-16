@@ -49,9 +49,9 @@ USER_AGENT = (
     "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
     "(KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36"
 )
-REQUEST_DELAY_SEC = 1.5  # 요청 간 딜레이 (서버 부하·차단 완화)
-# 네이버 검색 페이지 JS 렌더링 대기 (해외 서버에서는 더 길게)
-NAVER_LOAD_WAIT_SEC = 6
+REQUEST_DELAY_SEC = 1.0  # 요청 간 딜레이 (서버 부하·차단 완화)
+# 네이버 검색 페이지 JS 렌더링 대기
+NAVER_LOAD_WAIT_SEC = 3
 
 
 def get_supabase() -> Client:
@@ -334,18 +334,20 @@ async def collect_powerlink_urls(page, keyword: str, max_results: int = 20, page
     return urls
 
 
-async def collect_shopping_store_urls(page, keyword: str, max_results: int = 20, page_start: int = 1, page_end: int = 1) -> set:
-    """네이버 쇼핑검색에서 스토어 URL을 지정 페이지 범위(맨 하단 페이지 번호)로 수집."""
+async def collect_shopping_store_urls(page, keyword: str, max_results: int = 20, page_start: int = 1, page_end: int = 1) -> tuple[set, bool]:
+    """네이버 쇼핑검색에서 스토어 URL을 지정 페이지 범위로 수집. 오류 시 (빈 set, True) 반환."""
     urls = set()
     page_start = max(1, page_start)
     page_end = max(page_start, page_end)
+    consecutive_empty = 0  # 연속 빈 페이지 카운터
+    had_error = False
     for pg in range(page_start, page_end + 1):
         page_url = f"{NAVER_SHOPPING_SEARCH}?query={keyword}&pagingIndex={pg}"
         try:
             await page.goto(page_url, wait_until="domcontentloaded", timeout=20000)
             await asyncio.sleep(NAVER_LOAD_WAIT_SEC)
             try:
-                await page.wait_for_load_state("networkidle", timeout=8000)
+                await page.wait_for_load_state("networkidle", timeout=6000)
             except Exception:
                 pass
             raw = await page.evaluate(_SHOPPING_STORE_LINKS_JS)
@@ -357,16 +359,23 @@ async def collect_shopping_store_urls(page, keyword: str, max_results: int = 20,
             added = len(urls) - before
             print(f"      [쇼핑 {pg}페이지] {added}개 신규 URL (누적 {len(urls)}개)")
             if added == 0:
-                break
+                consecutive_empty += 1
+                if consecutive_empty >= 3:  # 연속 3페이지 빈 경우에만 중단
+                    print(f"      [쇼핑] 연속 3페이지 수집 없음, 중단")
+                    break
+            else:
+                consecutive_empty = 0
             if len(urls) >= max_results:
                 break
         except PlaywrightTimeout:
-            print(f"      [쇼핑 {pg}페이지] 타임아웃")
+            print(f"      [쇼핑 {pg}페이지] 타임아웃 — 쇼핑 수집 중단")
+            had_error = True
             break
         except Exception as e:
-            print(f"      [쇼핑 {pg}페이지 오류] {e}")
+            print(f"      [쇼핑 {pg}페이지 오류] {e} — 쇼핑 수집 중단")
+            had_error = True
             break
-    return urls
+    return urls, had_error
 
 
 async def fetch_page_content(page, url: str):
@@ -480,7 +489,9 @@ async def run_crawler(keyword: str, max_sites: int = 40, page_start: int = 1, pa
         try:
             print(f"[1/3] 네이버 업체 수집: '{keyword}' (파워링크 + 쇼핑 {page_start}~{page_end}페이지, 소스당 최대 {max_results_per_source}개)")
             pl_urls = await collect_powerlink_urls(page, keyword, max_results=max_results_per_source, page_start=page_start, page_end=page_end)
-            shop_urls = await collect_shopping_store_urls(page, keyword, max_results=max_results_per_source, page_start=page_start, page_end=page_end)
+            shop_urls, shop_error = await collect_shopping_store_urls(page, keyword, max_results=max_results_per_source, page_start=page_start, page_end=page_end)
+            if shop_error and len(shop_urls) == 0:
+                print(f"      [쇼핑 수집 실패] 오류 발생 — 파워링크 결과만 사용합니다.")
             raw_merged = pl_urls | shop_urls
             # canonical 기준 중복 제거 (동일 업체 한 번만)
             seen_key: set[str] = set()
@@ -489,7 +500,8 @@ async def run_crawler(keyword: str, max_sites: int = 40, page_start: int = 1, pa
                 if k and k not in seen_key:
                     seen_key.add(k)
                     all_urls.add(u)
-            print(f"      → 파워링크 {len(pl_urls)}개 + 쇼핑 {len(shop_urls)}개 → 중복 제거 후 {len(all_urls)}개 (최대 {visit_limit}개 방문)")
+            shop_note = "(쇼핑 오류, 파워링크만)" if shop_error and len(shop_urls) == 0 else f"+ 쇼핑 {len(shop_urls)}개"
+            print(f"      → 파워링크 {len(pl_urls)}개 {shop_note} → 중복 제거 후 {len(all_urls)}개 (최대 {visit_limit}개 방문)")
         finally:
             await browser.close()
 

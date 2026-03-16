@@ -685,6 +685,22 @@ export default function DashboardPage() {
         >
           새로고침
         </button>
+        <button
+          onClick={() => {
+            const ids = selected.size > 0 ? Array.from(selected).join(",") : "";
+            const url = ids
+              ? `/api/export-excel?ids=${encodeURIComponent(ids)}`
+              : `/api/export-excel`;
+            window.location.href = url;
+          }}
+          style={{
+            padding: "10px 20px", background: "#0284c7", color: "#fff",
+            border: "none", borderRadius: 8, cursor: "pointer", fontWeight: 600,
+          }}
+          title={selected.size > 0 ? `선택 ${selected.size}건 엑셀 다운로드` : "전체 엑셀 다운로드"}
+        >
+          📥 엑셀 다운로드{selected.size > 0 ? ` (${selected.size}건)` : " (전체)"}
+        </button>
       </section>
 
       {/* 메시지 */}
